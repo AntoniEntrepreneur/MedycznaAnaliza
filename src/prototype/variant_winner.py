@@ -1,12 +1,4 @@
-"""Unified Winning Variant: Clinician-Tailored EHR Workstation.
-
-Synthesized from the user design interview:
-1. Persistent categorized sidebar with quick archetype presets at the top.
-2. Top KPI summary metric cards (Risk %, Relative Risk vs Baseline, Risk Category, Glycemic Status).
-3. Bento center: Semicircular dial gauge meter (left) + SHAP factor impact waterfall (right).
-4. Bottom actionability: Real-time 'What-If' sensitivity simulator with dynamic ARR/RRR and counseling script.
-5. Collapsible copy-ready formatted EHR consultation note.
-"""
+"""Unified Winning Variant: Clinician-Tailored EHR Workstation (Tunable)."""
 
 from typing import Dict, Any
 import streamlit as st
@@ -18,11 +10,46 @@ from src.prototype.components import (
     render_state_inspector,
     get_risk_tier,
 )
+from src.prototype.tuner_component import render_tuner_panel
 
 
 def render_winning_variant():
-    """Render the synthesized winning variant for clinical risk calculation."""
-    st.title("🩺 Clinical Stroke Risk Calculator (Validated Design)")
+    """Render the synthesized winning variant with tunable CSS variables."""
+    # Mount floating knob panel
+    render_tuner_panel()
+
+    # Inject CSS variables styling
+    st.markdown(
+        """
+        <style>
+        .tunable-card {
+            background-color: var(--tune-card-bg, #f8fafc);
+            border-radius: var(--tune-card-radius, 10px);
+            box-shadow: var(--tune-card-shadow, 0 4px 12px rgba(0,0,0,0.08));
+            padding: var(--tune-container-padding, 18px);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 16px;
+            transition: all 0.2s ease;
+        }
+        .tunable-accent {
+            color: var(--tune-accent-color, #2563eb) !important;
+        }
+        .pop-badge-wrapper {
+            display: var(--tune-show-pop-badge, inline-block);
+        }
+        .dial-container {
+            max-width: var(--tune-dial-size, 320px);
+            margin: 0 auto;
+        }
+        .ehr-note-area textarea {
+            font-family: var(--tune-ehr-font, ui-monospace, monospace) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.title("🩺 Clinical Stroke Risk Calculator")
     st.caption("EHR Decision Support Workstation • Calibrated LightGBM & SHAP Attribution")
 
     # --- SIDEBAR: Presets & Categorized Inputs ---
@@ -118,37 +145,102 @@ def render_winning_variant():
     # --- TOP KPI METRIC CARDS STRIP ---
     k1, k2, k3, k4 = st.columns(4)
     with k1:
-        st.metric("5-Year Predicted Risk", f"{prob * 100:.1f}%")
+        st.markdown(
+            f"""
+            <div class="tunable-card" style="text-align: center;">
+                <div style="font-size: 0.8rem; color: #64748b; font-weight: 600;">5-YEAR STROKE RISK</div>
+                <div class="tunable-accent" style="font-size: 1.85rem; font-weight: 800; margin-top: 4px;">{prob * 100:.1f}%</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with k2:
-        st.metric(
-            "Relative Risk vs Population",
-            f"{relative_risk:.1f}x",
-            delta=f"{relative_risk - 1.0:+.1f}x",
-            delta_color="inverse",
+        st.markdown(
+            f"""
+            <div class="tunable-card" style="text-align: center;">
+                <div style="font-size: 0.8rem; color: #64748b; font-weight: 600;">RELATIVE RISK</div>
+                <div style="font-size: 1.85rem; font-weight: 800; color: #0f172a; margin-top: 4px;">
+                    {relative_risk:.1f}x
+                </div>
+                <div class="pop-badge-wrapper" style="font-size: 0.75rem; color: #e11d48; font-weight: 700;">
+                    {relative_risk - 1.0:+.1f}x vs baseline
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
     with k3:
-        st.metric("Clinical Risk Category", tier["tier"])
+        st.markdown(
+            f"""
+            <div class="tunable-card" style="text-align: center;">
+                <div style="font-size: 0.8rem; color: #64748b; font-weight: 600;">CLINICAL TIER</div>
+                <div style="display: inline-block; margin-top: 6px; padding: 4px 12px; border-radius: 999px; background:{tier['bg']}; color:{tier['color']}; font-weight:800; font-size:1.1rem;">
+                    {tier['tier']}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with k4:
-        st.metric("Glycemic Status", "Diabetic (≥140)" if patient["avg_glucose_level"] >= 140 else "Normal / Pre-diabetic")
-
-    st.markdown("---")
+        glycemic = "Diabetic (≥140)" if patient["avg_glucose_level"] >= 140 else "Normal / Pre-DM"
+        gly_color = "#dc2626" if patient["avg_glucose_level"] >= 140 else "#16a34a"
+        st.markdown(
+            f"""
+            <div class="tunable-card" style="text-align: center;">
+                <div style="font-size: 0.8rem; color: #64748b; font-weight: 600;">GLYCEMIC STATUS</div>
+                <div style="font-size: 1.3rem; font-weight: 700; color: {gly_color}; margin-top: 8px;">
+                    {glycemic}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     # --- CENTER BENTO: Gauge + SHAP Waterfall ---
     c_gauge, c_shap = st.columns([1, 1])
     with c_gauge:
-        st.markdown("### 🎯 Predictive Risk Dial")
+        st.markdown(
+            """
+            <div class="tunable-card">
+                <div style="font-weight: 700; font-size: 1.05rem; margin-bottom: 8px; color: #1e293b;">
+                    🎯 Predictive Risk Dial
+                </div>
+                <div class="dial-container">
+            """,
+            unsafe_allow_html=True,
+        )
         render_risk_gauge(prob, title="5-Year Stroke Risk")
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
     with c_shap:
-        st.markdown("### 🔬 Feature Impact Breakdown (SHAP)")
-        st.caption("Directional impact on prediction: Risk Escalators (Red) vs Protective Factors (Green)")
+        st.markdown(
+            """
+            <div class="tunable-card">
+                <div style="font-weight: 700; font-size: 1.05rem; margin-bottom: 2px; color: #1e293b;">
+                    🔬 Feature Impact Breakdown (SHAP)
+                </div>
+                <div style="font-size: 0.82rem; color: #64748b; margin-bottom: 10px;">
+                    Directional impact: Red = Escalators, Green = Protective
+                </div>
+            """,
+            unsafe_allow_html=True,
+        )
         render_shap_waterfall(contributions, max_features=7)
-
-    st.markdown("---")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # --- BOTTOM SECTION: Real-Time 'What-If' Sensitivity & Actionability ---
-    st.markdown("### 🎛️ Clinical Intervention Sensitivity Simulator")
-    st.caption("Adjust modifiable risk targets to evaluate projected risk reduction for patient counseling.")
+    st.markdown(
+        """
+        <div class="tunable-card">
+            <div style="font-weight: 700; font-size: 1.15rem; color: #1e293b; margin-bottom: 4px;">
+                🎛️ Clinical Intervention Sensitivity Simulator
+            </div>
+            <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 14px;">
+                Adjust modifiable clinical targets to evaluate projected stroke risk reduction for patient counseling.
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     sim_c1, sim_c2, sim_c3 = st.columns(3)
     with sim_c1:
@@ -206,7 +298,9 @@ def render_winning_variant():
                 f"representing a **{rrr:.0f}% relative risk reduction**).'*"
             )
         else:
-            st.info("Biomarkers are already within the optimal target range.")
+            st.info("Biomarkers are already within optimal target range.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # --- COLLAPSIBLE FORMATTED EHR NOTE ---
     with st.expander("📋 Exportable Clinical Consultation Note (EHR Ready)", expanded=False):
@@ -230,7 +324,9 @@ def render_winning_variant():
             f"- Absolute Risk Reduction (ARR): {arr:.1f}% | Relative Risk Reduction (RRR): {rrr:.1f}%\n"
             f"- Clinical Pathway: {tier['recommendation']}\n"
         )
+        st.markdown('<div class="ehr-note-area">', unsafe_allow_html=True)
         st.text_area("Copy into Clinical Health Record:", ehr_body, height=220)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Surface state (Rule 5)
     render_state_inspector({"patient": patient, "simulated_target": sim_patient})
