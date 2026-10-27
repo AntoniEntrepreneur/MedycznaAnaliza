@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 VARIANTS = [
+    ("Winner", "Validated Combined Design"),
     ("A", "Guided Intake & Triage Wizard"),
     ("B", "Bento Clinical Dashboard"),
     ("C", "Comparative Intervention Studio"),

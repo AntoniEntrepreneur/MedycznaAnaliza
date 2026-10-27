@@ -15,6 +15,7 @@ Variants:
 
 import streamlit as st
 from src.prototype.components import render_prototype_switcher, VARIANT_KEYS, VARIANT_MAP
+from src.prototype.variant_winner import render_winning_variant
 from src.prototype.variant_a import render_variant_a
 from src.prototype.variant_b import render_variant_b
 from src.prototype.variant_c import render_variant_c
@@ -47,13 +48,13 @@ st.markdown(
 def main():
     """Main routing and switcher entrypoint for the UI prototype."""
     # Query parameter resolution
-    query_variant = st.query_params.get("variant", "A")
+    query_variant = st.query_params.get("variant", "Winner")
     if isinstance(query_variant, list):
-        query_variant = query_variant[0] if query_variant else "A"
+        query_variant = query_variant[0] if query_variant else "Winner"
 
     if query_variant not in VARIANT_KEYS:
-        query_variant = "A"
-        st.query_params["variant"] = "A"
+        query_variant = "Winner"
+        st.query_params["variant"] = "Winner"
 
     # Top banner indicating prototype mode and variant selection
     top_col1, top_col2 = st.columns([3, 1])
@@ -74,7 +75,9 @@ def main():
             st.rerun()
 
     # Route to appropriate variant
-    if query_variant == "A":
+    if query_variant == "Winner":
+        render_winning_variant()
+    elif query_variant == "A":
         render_variant_a()
     elif query_variant == "B":
         render_variant_b()
