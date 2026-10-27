@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "skills": {
+    "grill-me": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "computedHash": "af10ead707c27833563dd051872314164af4128512821a553506f79b937946e9"
+    },
+    "grilling": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grilling/SKILL.md",
+      "computedHash": "35ed6be7e4e0caca0042c8775e7d4c2a794cc0f3fa3bbb37323ca6d47d5379e9"
+    },
+    "handoff": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/handoff/SKILL.md",
+      "computedHash": "2884bd957939c2420a279b40d32d4e650656cfb4639d7972fe95a73ef4704e82"
+    },
+    "implement": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/implement/SKILL.md",
+      "computedHash": "78eceffb85bb7fcee014854f6292ca88527c516fbaa5109ed67966b0e36da946"
+    },
+    "implement-spec": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/implement-spec/SKILL.md",
+      "computedHash": "ecb5e47a87f48a1db6198fbcdf152255b4870831ac0a006d337f0eb13a6c688d"
+    },
+    "pr": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/pr/SKILL.md",
+      "computedHash": "6a54bf56a5d19f4f4d34aedb6f03cb5c5e1434ea768e7dc3b334e9c8b9833008"
+    },
+    "prototype": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/prototype/SKILL.md",
+      "computedHash": "e3b5d14ead5d200688c8a3f7c726a994e7e0bc8877d6b49980c52cad1eb9402f"
+    },
+    "research": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/research/SKILL.md",
+      "computedHash": "ac9774692cafd99683494c08872ed05ee3b219b670d0c6d2af63b1935ca642ca"
+    },
+    "setup-antoni-skills": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/personal/setup-antoni-skills/SKILL.md",
+      "computedHash": "feae8b5647b782a68dcb8b5d84ca200a108a88721f38a59f7b14f17d9a763b4b"
+    },
+    "setup-sandcastle": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/personal/setup-sandcastle/SKILL.md",
+      "computedHash": "08be00c51a6cc02e88c32c0f4bef96105083d71ab193d937e04c6db821091146"
+    },
+    "to-spec": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/to-spec/SKILL.md",
+      "computedHash": "b03dfed8cb1af7a8333429cef96c6091ed0bfe8f92c72e2bab416d2e7faa4d00"
+    },
+    "to-tickets": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/to-tickets/SKILL.md",
+      "computedHash": "13926a1b50171d697bc08bf69dca1ef13cda1d278328a7c341b45aaeed086a34"
+    },
+    "wayfinder": {
+      "source": "AntoniEntrepreneur/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/wayfinder/SKILL.md",
+      "computedHash": "0dec171fee39b1624903b68b77489acc16c31df045fcc4099d2ed00b674e087a"
+    }
+  }
+}
