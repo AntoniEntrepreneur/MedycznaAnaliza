@@ -5,6 +5,7 @@ Projekt - Analiza Danych w Medycynie.
 ## Guidelines
 
 - Keep minimal docstrings that describe what the code is doing.
+- No automated tests required (small academic project).
 
 ## Agent docs
 
