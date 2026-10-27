@@ -15,19 +15,20 @@ KNOBS = [
             {"label": "lg (16px)", "value": "16px"},
             {"label": "full (24px)", "value": "24px"},
         ],
-        "default": "md (10px)",
+        "default": "full (24px)",
     },
     {
         "name": "card-bg",
         "label": "Card Background",
         "type": "color",
         "swatches": [
+            {"label": "ice-sky", "value": "#caf0fe"},
             {"label": "slate-50", "value": "#f8fafc"},
             {"label": "white", "value": "#ffffff"},
             {"label": "sky-50", "value": "#f0f9ff"},
             {"label": "zinc-50", "value": "#fafafa"},
         ],
-        "default": "slate-50",
+        "default": "ice-sky",
     },
     {
         "name": "accent-color",

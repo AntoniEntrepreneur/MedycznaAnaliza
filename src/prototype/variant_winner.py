@@ -23,11 +23,11 @@ def render_winning_variant():
         """
         <style>
         .tunable-card {
-            background-color: var(--tune-card-bg, #f8fafc);
-            border-radius: var(--tune-card-radius, 10px);
+            background-color: var(--tune-card-bg, #caf0fe);
+            border-radius: var(--tune-card-radius, 24px);
             box-shadow: var(--tune-card-shadow, 0 4px 12px rgba(0,0,0,0.08));
             padding: var(--tune-container-padding, 18px);
-            border: 1px solid #e2e8f0;
+            border: 1px solid #bae6fd;
             margin-bottom: 16px;
             transition: all 0.2s ease;
         }
