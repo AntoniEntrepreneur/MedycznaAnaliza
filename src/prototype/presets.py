@@ -1,0 +1,62 @@
+"""Clinical scenario presets and patient state definitions for UI prototype."""
+
+PATIENT_PRESETS = {
+    "Elderly Comorbid Patient (High Risk)": {
+        "gender": "Male",
+        "age": 67.0,
+        "hypertension": 1,
+        "heart_disease": 1,
+        "ever_married": "Yes",
+        "work_type": "Private",
+        "Residence_type": "Urban",
+        "avg_glucose_level": 228.7,
+        "bmi": 36.6,
+        "smoking_status": "formerly smoked",
+    },
+    "Healthy Young Adult (Low Risk)": {
+        "gender": "Female",
+        "age": 28.0,
+        "hypertension": 0,
+        "heart_disease": 0,
+        "ever_married": "No",
+        "work_type": "Private",
+        "Residence_type": "Urban",
+        "avg_glucose_level": 82.5,
+        "bmi": 22.1,
+        "smoking_status": "never smoked",
+    },
+    "Middle-Aged Diabetic Smoker (Elevated Risk)": {
+        "gender": "Male",
+        "age": 54.0,
+        "hypertension": 1,
+        "heart_disease": 0,
+        "ever_married": "Yes",
+        "work_type": "Self-employed",
+        "Residence_type": "Rural",
+        "avg_glucose_level": 185.0,
+        "bmi": 31.4,
+        "smoking_status": "smokes",
+    },
+    "Normotensive Active Senior (Moderate Risk)": {
+        "gender": "Female",
+        "age": 71.0,
+        "hypertension": 0,
+        "heart_disease": 0,
+        "ever_married": "Yes",
+        "work_type": "Govt_job",
+        "Residence_type": "Rural",
+        "avg_glucose_level": 94.2,
+        "bmi": 24.3,
+        "smoking_status": "never smoked",
+    },
+}
+
+DEFAULT_PATIENT = PATIENT_PRESETS["Elderly Comorbid Patient (High Risk)"]
+
+CATEGORICAL_OPTIONS = {
+    "gender": ["Male", "Female", "Other"],
+    "ever_married": ["Yes", "No"],
+    "work_type": ["Private", "Self-employed", "Govt_job", "children", "Never_worked"],
+    "Residence_type": ["Urban", "Rural"],
+    "smoking_status": ["never smoked", "formerly smoked", "smokes", "Unknown"],
+}
