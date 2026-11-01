@@ -10,8 +10,10 @@ from src.app.model import predict_patient_risk
 from src.app.components import (
     render_risk_gauge,
     render_shap_waterfall,
+    render_population_bento_card,
     get_risk_tier,
 )
+from src.population import calculate_patient_percentiles
 
 # Page configuration
 st.set_page_config(
@@ -231,6 +233,9 @@ def main():
         render_shap_waterfall(contributions, max_features=7)
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # --- POPULATION BENCHMARK BENTO CARD (TICKET #27) ---
+    render_population_bento_card(patient_risk=prob, patient_age=patient["age"])
+
     # --- BOTTOM SECTION: Real-Time 'What-If' Sensitivity & Actionability ---
     st.markdown(
         """
@@ -308,6 +313,7 @@ def main():
     # --- COLLAPSIBLE FORMATTED EHR NOTE ---
     with st.expander("📋 Exportable Clinical Consultation Note (EHR Ready)", expanded=False):
         top_driver = contributions.iloc[0]
+        pop_benchmarks = calculate_patient_percentiles(prob, patient["age"])
         ehr_body = (
             f"STROKE RISK STRATIFICATION & INTERVENTION NOTE\n"
             f"---------------------------------------------------\n"
@@ -319,6 +325,7 @@ def main():
             f"FINDINGS:\n"
             f"- Model Predicted 5-Year Stroke Risk: {prob * 100:.1f}%\n"
             f"- Relative Risk vs Population Baseline: {relative_risk:.1f}x\n"
+            f"- Population Percentile Benchmarks: {pop_benchmarks['decade_percentile']:.1f}% ({pop_benchmarks['decade_label']}) | {pop_benchmarks['overall_percentile']:.1f}% (Adult Cohort Overall)\n"
             f"- Clinical Risk Category: {tier['tier'].upper()}\n"
             f"- Dominant Risk Contributor: {top_driver['feature']} ({top_driver['value']}) with SHAP impact +{top_driver['shap_value']:.2f}\n\n"
             f"INTERVENTION GOALS & PROJECTED RISK REDUCTION:\n"

@@ -31,6 +31,12 @@ from src.ml import (
     load_production_pipeline,
     predict_stroke_risk,
 )
+from src.population import (
+    get_population_baseline_risks,
+    calculate_patient_percentiles,
+    plot_population_risk_distribution,
+    get_age_decade_label,
+)
 
 __all__ = [
     "load_data",
@@ -56,4 +62,8 @@ __all__ = [
     "save_production_pipeline",
     "load_production_pipeline",
     "predict_stroke_risk",
+    "get_population_baseline_risks",
+    "calculate_patient_percentiles",
+    "plot_population_risk_distribution",
+    "get_age_decade_label",
 ]
