@@ -183,7 +183,8 @@ def main() -> None:
 
     # Model prediction
     if pipeline_artifact is not None:
-        prob = float(predict_stroke_risk(pipeline_artifact, patient)[0])
+        risk_out = predict_stroke_risk(pipeline_artifact, patient)
+        prob = float(risk_out["probability"] if isinstance(risk_out, dict) else risk_out[0])
         _, contributions = predict_patient_risk(patient)
     else:
         prob, contributions = predict_patient_risk(patient)
@@ -360,7 +361,8 @@ def main() -> None:
             sim_patient["smoking_status"] = "never smoked"
 
         if pipeline_artifact is not None:
-            sim_prob = float(predict_stroke_risk(pipeline_artifact, sim_patient)[0])
+            sim_risk_out = predict_stroke_risk(pipeline_artifact, sim_patient)
+            sim_prob = float(sim_risk_out["probability"] if isinstance(sim_risk_out, dict) else sim_risk_out[0])
         else:
             sim_prob, _ = predict_patient_risk(sim_patient)
 
