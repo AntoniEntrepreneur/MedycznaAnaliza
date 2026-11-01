@@ -19,6 +19,7 @@ from src.biostats import (
 from src.visualization import (
     plot_forest_matplotlib,
     plot_forest_plotly,
+    create_risk_gauge,
 )
 from src.ml import (
     build_preprocessor,
@@ -37,6 +38,9 @@ from src.population import (
     plot_population_risk_distribution,
     get_age_decade_label,
 )
+from src.vascular_age import (
+    calculate_vascular_age,
+)
 
 __all__ = [
     "load_data",
@@ -53,6 +57,7 @@ __all__ = [
     "COVARIATE_LABELS_PL",
     "plot_forest_matplotlib",
     "plot_forest_plotly",
+    "create_risk_gauge",
     "build_preprocessor",
     "get_model_catalog",
     "optimize_threshold",
@@ -66,4 +71,5 @@ __all__ = [
     "calculate_patient_percentiles",
     "plot_population_risk_distribution",
     "get_age_decade_label",
+    "calculate_vascular_age",
 ]

@@ -391,3 +391,96 @@ def plot_forest_plotly(
     )
 
     return fig
+
+
+def create_risk_gauge(
+    risk_prob: float,
+    optimal_threshold: float = 0.07,
+    default_threshold: float = 0.50,
+) -> go.Figure:
+    """Render semicircular polar risk gauge with dual-threshold indicator.
+
+    Features 3-tier clinical color segments (<10% Green #16a34a, 10-25% Amber #ca8a04,
+    >=25% Red #dc2626) with dual visual markers for F2-optimized threshold p* and default 0.50.
+    """
+    val_pct = float(risk_prob * 100.0 if risk_prob <= 1.0 else risk_prob)
+    opt_pct = float(optimal_threshold * 100.0 if optimal_threshold <= 1.0 else optimal_threshold)
+    def_pct = float(default_threshold * 100.0 if default_threshold <= 1.0 else default_threshold)
+
+    val_pct = float(np.clip(round(val_pct, 2), 0.0, 100.0))
+    opt_pct = float(round(opt_pct, 2))
+    def_pct = float(round(def_pct, 2))
+
+    raw_ticks = [0.0, 10.0, 25.0, def_pct, 75.0, 100.0]
+    if opt_pct not in raw_ticks:
+        raw_ticks.append(opt_pct)
+    raw_ticks = sorted(list(set(raw_ticks)))
+
+    tickvals = []
+    ticktext = []
+    for t in raw_ticks:
+        tickvals.append(t)
+        if abs(t - opt_pct) < 1e-4:
+            ticktext.append(f"p*={t:.0f}%")
+        elif abs(t - def_pct) < 1e-4:
+            ticktext.append(f"p={t:.0f}%")
+        else:
+            ticktext.append(f"{t:.0f}%")
+
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=val_pct,
+            number={
+                "suffix": "%",
+                "valueformat": ".1f",
+                "font": {"size": 36, "color": "#0f172a", "family": "sans-serif"},
+            },
+            gauge={
+                "shape": "angular",
+                "axis": {
+                    "range": [0, 100],
+                    "tickmode": "array",
+                    "tickvals": tickvals,
+                    "ticktext": ticktext,
+                    "tickwidth": 2,
+                    "tickcolor": "#334155",
+                    "tickfont": {"size": 11, "color": "#334155"},
+                },
+                "bar": {"color": "#0f172a", "thickness": 0.28},
+                "bgcolor": "white",
+                "borderwidth": 1,
+                "bordercolor": "#cbd5e1",
+                "steps": [
+                    {"range": [0, 10], "color": "#16a34a"},
+                    {"range": [10, 25], "color": "#ca8a04"},
+                    {"range": [25, 100], "color": "#dc2626"},
+                ],
+                "threshold": {
+                    "line": {"color": "#2563eb", "width": 4},
+                    "thickness": 0.85,
+                    "value": opt_pct,
+                },
+            },
+        )
+    )
+
+    fig.add_annotation(
+        x=0.5,
+        y=0.14,
+        text=(
+            f"<span style='color:#2563eb; font-weight:700;'>▮ p* = {opt_pct:.1f}%</span> (F₂-opt) &nbsp;|&nbsp; "
+            f"<span style='color:#475569; font-weight:700;'>❘ p = {def_pct:.0f}%</span> (Domyślny)"
+        ),
+        showarrow=False,
+        font=dict(size=12, family="sans-serif"),
+    )
+
+    fig.update_layout(
+        height=270,
+        margin=dict(l=25, r=25, t=30, b=15),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    return fig

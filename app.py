@@ -3,7 +3,7 @@
 Clinician decision support workstation validated in Issue #7.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import streamlit as st
 from src.app.presets import PATIENT_PRESETS, CATEGORICAL_OPTIONS
 from src.app.model import predict_patient_risk
@@ -14,6 +14,8 @@ from src.app.components import (
     get_risk_tier,
 )
 from src.population import calculate_patient_percentiles
+from src.ml import load_production_pipeline, predict_stroke_risk
+from src.vascular_age import calculate_vascular_age
 
 # Page configuration
 st.set_page_config(
@@ -51,6 +53,15 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+@st.cache_resource(show_spinner=False)
+def get_production_pipeline_artifact():
+    """Load and cache calibrated production model pipeline artifact."""
+    try:
+        return load_production_pipeline()
+    except Exception:
+        return None
 
 
 def main():
@@ -143,34 +154,56 @@ def main():
         )
 
     # Compute risk and attribution
-    prob, contributions = predict_patient_risk(patient)
+    pipeline_artifact = get_production_pipeline_artifact()
+    if pipeline_artifact is not None:
+        risk_res = predict_stroke_risk(pipeline_artifact, patient)
+        prob = risk_res["probability"]
+        optimal_th = pipeline_artifact.get("optimal_threshold", 0.07)
+    else:
+        prob, _ = predict_patient_risk(patient)
+        optimal_th = 0.07
+
+    _, contributions = predict_patient_risk(patient)
     tier = get_risk_tier(prob)
     baseline_pop_rate = 0.0487  # ~4.87% population stroke rate in Kaggle dataset
     relative_risk = prob / baseline_pop_rate
 
-    # --- TOP KPI METRIC CARDS STRIP ---
+    # Calculate vascular age via model inversion
+    vasc_res = calculate_vascular_age(
+        patient_risk=prob,
+        pipeline_artifact=pipeline_artifact,
+        chronological_age=float(patient["age"]),
+        patient_gender=patient["gender"],
+    )
+    vasc_age = vasc_res["vascular_age"]
+    delta_age = vasc_res["delta"]
+    rejuv_potential = vasc_res["rejuvenation_potential"]
+
+    # --- TOP 4-KPI SUMMARY STRIP ---
     k1, k2, k3, k4 = st.columns(4)
     with k1:
         st.markdown(
             f"""
             <div class="clinic-card" style="text-align: center;">
-                <div style="font-size: 0.8rem; color: #475569; font-weight: 700;">5-YEAR STROKE RISK</div>
-                <div class="clinic-accent" style="font-size: 1.9rem; font-weight: 800; margin-top: 4px;">{prob * 100:.1f}%</div>
+                <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">WIEK CHRONOLOGICZNY</div>
+                <div style="font-size: 2.0rem; font-weight: 800; color: #0f172a; margin-top: 4px;">{patient['age']:.0f} lat</div>
+                <div style="font-size: 0.78rem; color: #64748b; font-weight: 600; margin-top: 2px;">Metryka pacjenta ({patient['gender']})</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
     with k2:
+        threshold_tag = (
+            f"<span style='color: #dc2626;'>⚠️ > p* ({optimal_th * 100:.0f}%)</span>"
+            if prob >= optimal_th
+            else f"<span style='color: #16a34a;'>✅ ≤ p* ({optimal_th * 100:.0f}%)</span>"
+        )
         st.markdown(
             f"""
             <div class="clinic-card" style="text-align: center;">
-                <div style="font-size: 0.8rem; color: #475569; font-weight: 700;">RELATIVE RISK</div>
-                <div style="font-size: 1.9rem; font-weight: 800; color: #0f172a; margin-top: 4px;">
-                    {relative_risk:.1f}x
-                </div>
-                <div style="font-size: 0.78rem; color: #e11d48; font-weight: 700;">
-                    {relative_risk - 1.0:+.1f}x vs baseline
-                </div>
+                <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">RYZYKO UDARU (5 LAT)</div>
+                <div class="clinic-accent" style="font-size: 2.0rem; font-weight: 800; margin-top: 4px;">{prob * 100:.1f}%</div>
+                <div style="font-size: 0.78rem; font-weight: 700; margin-top: 2px;">{threshold_tag}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -179,24 +212,34 @@ def main():
         st.markdown(
             f"""
             <div class="clinic-card" style="text-align: center;">
-                <div style="font-size: 0.8rem; color: #475569; font-weight: 700;">CLINICAL TIER</div>
-                <div style="display: inline-block; margin-top: 6px; padding: 4px 14px; border-radius: 999px; background:{tier['bg']}; color:{tier['color']}; font-weight:800; font-size:1.1rem; border: 1px solid {tier['border']};">
-                    {tier['tier']}
+                <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">KATEGORIA RYZYKA</div>
+                <div style="margin-top: 6px;">
+                    <span style="display: inline-block; padding: 4px 14px; border-radius: 999px; background:{tier['bg']}; color:{tier['color']}; font-weight:800; font-size:1.1rem; border: 1px solid {tier['border']};">
+                        {tier['tier']}
+                    </span>
                 </div>
+                <div style="font-size: 0.76rem; color: #64748b; font-weight: 600; margin-top: 4px;">Przedział: {tier['cutoff_range']}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
     with k4:
-        glycemic = "Diabetic (≥140)" if patient["avg_glucose_level"] >= 140 else "Normal / Pre-DM"
-        gly_color = "#dc2626" if patient["avg_glucose_level"] >= 140 else "#16a34a"
+        if delta_age > 0:
+            delta_badge = f"""<span style="display: inline-block; padding: 2px 7px; border-radius: 6px; background: #fee2e2; color: #dc2626; font-weight: 800; font-size: 0.82rem; border: 1px solid #fca5a5;">+{delta_age:.1f} lat</span>"""
+            framing_subtext = f"""<div style="font-size: 0.76rem; color: #2563eb; font-weight: 700; margin-top: 4px;">Potencjał Odmłodzenia: -{rejuv_potential:.1f} lat</div>"""
+        else:
+            delta_badge = f"""<span style="display: inline-block; padding: 2px 7px; border-radius: 6px; background: #dcfce7; color: #16a34a; font-weight: 800; font-size: 0.82rem; border: 1px solid #86efac;">{delta_age:+.1f} lat</span>"""
+            framing_subtext = f"""<div style="font-size: 0.76rem; color: #16a34a; font-weight: 700; margin-top: 4px;">Wiek naczyniowy optymalny</div>"""
+
         st.markdown(
             f"""
             <div class="clinic-card" style="text-align: center;">
-                <div style="font-size: 0.8rem; color: #475569; font-weight: 700;">GLYCEMIC STATUS</div>
-                <div style="font-size: 1.35rem; font-weight: 700; color: {gly_color}; margin-top: 8px;">
-                    {glycemic}
+                <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">WIEK NACZYNIOWY</div>
+                <div style="display: flex; align-items: baseline; justify-content: center; gap: 6px; margin-top: 4px;">
+                    <span style="font-size: 2.0rem; font-weight: 800; color: #0f172a;">{vasc_age:.0f} lat</span>
+                    {delta_badge}
                 </div>
+                {framing_subtext}
             </div>
             """,
             unsafe_allow_html=True,
@@ -214,7 +257,12 @@ def main():
             """,
             unsafe_allow_html=True,
         )
-        render_risk_gauge(prob, title="5-Year Stroke Risk")
+        render_risk_gauge(
+            prob,
+            title="5-Year Stroke Risk",
+            optimal_threshold=optimal_th,
+            default_threshold=0.50,
+        )
         st.markdown("</div>", unsafe_allow_html=True)
 
     with c_shap:
@@ -285,7 +333,10 @@ def main():
     sim_patient["bmi"] = sim_bmi
     sim_patient["smoking_status"] = sim_smoking
 
-    sim_prob, _ = predict_patient_risk(sim_patient)
+    if pipeline_artifact is not None:
+        sim_prob = predict_stroke_risk(pipeline_artifact, sim_patient)["probability"]
+    else:
+        sim_prob, _ = predict_patient_risk(sim_patient)
     arr = (prob - sim_prob) * 100
     rrr = ((prob - sim_prob) / prob) * 100 if prob > 0 else 0
 
@@ -315,24 +366,27 @@ def main():
         top_driver = contributions.iloc[0]
         pop_benchmarks = calculate_patient_percentiles(prob, patient["age"])
         ehr_body = (
-            f"STROKE RISK STRATIFICATION & INTERVENTION NOTE\n"
+            f"STROKE RISK STRATIFICATION & CLINICAL DECISION SUPPORT NOTE\n"
             f"---------------------------------------------------\n"
             f"Demographics: Age {patient['age']:.0f} | Sex: {patient['gender']} | Residence: {patient['Residence_type']}\n"
             f"Hypertension: {'Yes' if patient['hypertension'] else 'No'} | "
             f"Heart Disease: {'Yes' if patient['heart_disease'] else 'No'} | "
             f"Smoking: {patient['smoking_status']}\n"
             f"Glucose: {patient['avg_glucose_level']:.1f} mg/dL | BMI: {patient['bmi']:.1f} kg/m²\n\n"
-            f"FINDINGS:\n"
-            f"- Model Predicted 5-Year Stroke Risk: {prob * 100:.1f}%\n"
-            f"- Relative Risk vs Population Baseline: {relative_risk:.1f}x\n"
+            f"ASSESSMENT & MODEL FINDINGS:\n"
+            f"- Predicted 5-Year Stroke Risk: {prob * 100:.1f}%\n"
+            f"- Clinical Risk Category: {tier['tier'].upper()} ({tier['cutoff_range']})\n"
+            f"- Screening Status: {'ABOVE OPTIMAL THRESHOLD (Positive)' if prob >= optimal_th else 'Below screening cutoff (Negative)'} (p* = {optimal_th * 100:.1f}%)\n"
+            f"- Vascular Age: {vasc_age:.1f} lat (Delta: {delta_age:+.1f} lat)\n"
+            f"- Framing / Guidance: {vasc_res['framing_message']}\n"
+            f"- Relative Risk vs Baseline: {relative_risk:.1f}x\n"
             f"- Population Percentile Benchmarks: {pop_benchmarks['decade_percentile']:.1f}% ({pop_benchmarks['decade_label']}) | {pop_benchmarks['overall_percentile']:.1f}% (Adult Cohort Overall)\n"
-            f"- Clinical Risk Category: {tier['tier'].upper()}\n"
-            f"- Dominant Risk Contributor: {top_driver['feature']} ({top_driver['value']}) with SHAP impact +{top_driver['shap_value']:.2f}\n\n"
+            f"- Primary Risk Contributor: {top_driver['feature']} ({top_driver['value']}) with SHAP impact +{top_driver['shap_value']:.2f}\n\n"
             f"INTERVENTION GOALS & PROJECTED RISK REDUCTION:\n"
             f"- Target Glucose: {sim_glucose:.0f} mg/dL | Target BMI: {sim_bmi:.1f} | Smoking: {sim_smoking}\n"
             f"- Projected Post-Intervention Risk: {sim_prob * 100:.1f}%\n"
             f"- Absolute Risk Reduction (ARR): {arr:.1f}% | Relative Risk Reduction (RRR): {rrr:.1f}%\n"
-            f"- Clinical Pathway: {tier['recommendation']}\n"
+            f"- Clinical Recommendation: {tier['recommendation']}\n"
         )
         st.markdown('<div class="ehr-note-area">', unsafe_allow_html=True)
         st.text_area("Copy into Clinical Health Record:", ehr_body, height=220)
