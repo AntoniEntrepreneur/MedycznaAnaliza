@@ -14,6 +14,17 @@ from src.biostats import (
     table_one_to_html,
     print_table_one,
 )
+from src.ml import (
+    build_preprocessor,
+    get_model_catalog,
+    optimize_threshold,
+    compute_classification_metrics,
+    classify_risk_tier,
+    run_ml_benchmark,
+    save_production_pipeline,
+    load_production_pipeline,
+    predict_stroke_risk,
+)
 
 __all__ = [
     "load_data",
@@ -26,5 +37,13 @@ __all__ = [
     "table_one_to_markdown",
     "table_one_to_html",
     "print_table_one",
+    "build_preprocessor",
+    "get_model_catalog",
+    "optimize_threshold",
+    "compute_classification_metrics",
+    "classify_risk_tier",
+    "run_ml_benchmark",
+    "save_production_pipeline",
+    "load_production_pipeline",
+    "predict_stroke_risk",
 ]
-
