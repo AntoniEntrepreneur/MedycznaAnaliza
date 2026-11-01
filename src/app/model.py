@@ -70,6 +70,7 @@ def predict_patient_risk(patient: Dict[str, Any]) -> Tuple[float, pd.DataFrame]:
 
     shap_explanation = explainer(row_df)
     shap_values = shap_explanation.values[0]
+    base_val = float(shap_explanation.base_values[0]) if hasattr(shap_explanation, "base_values") else 0.05
 
     contributions_df = pd.DataFrame({
         "feature": FEATURE_ORDER,
@@ -78,4 +79,37 @@ def predict_patient_risk(patient: Dict[str, Any]) -> Tuple[float, pd.DataFrame]:
         "abs_impact": np.abs(shap_values),
     }).sort_values(by="abs_impact", ascending=False)
 
+    contributions_df.attrs["base_value"] = base_val
+    contributions_df.attrs["explanation"] = shap_explanation[0]
+
     return prob, contributions_df
+
+
+@st.cache_data(show_spinner="Pobieranie globalnej ważności cech klinicznych...")
+def get_cached_global_importance() -> pd.DataFrame:
+    """Retrieve global feature importance DataFrame for the clinical LightGBM model."""
+    from src.xai import get_feature_importances
+    model, _ = get_model_and_explainer()
+    return get_feature_importances(model, FEATURE_ORDER)
+
+
+@st.cache_data(show_spinner="Ładowanie klinicznych studiów przypadków...")
+def get_cached_archetype_case_studies() -> Dict[str, Dict[str, Any]]:
+    """Retrieve 3 clinical archetypes with precomputed SHAP explanations."""
+    from src.xai import get_clinical_archetypes
+    model, explainer = get_model_and_explainer()
+    archetypes = get_clinical_archetypes(pipeline_or_model=model)
+
+    for _, data in archetypes.items():
+        p = data["patient"]
+        row_df = pd.DataFrame([p])[FEATURE_ORDER].copy()
+        for col in CATEGORICAL_COLS:
+            row_df[col] = row_df[col].astype("category")
+        exp = explainer(row_df)[0]
+        data["shap_values"] = exp.values.tolist()
+        data["base_value"] = float(exp.base_values)
+        data["feature_names"] = FEATURE_ORDER
+        data["data"] = [p[col] for col in FEATURE_ORDER]
+
+    return archetypes
+

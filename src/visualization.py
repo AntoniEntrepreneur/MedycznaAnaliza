@@ -9,6 +9,13 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from src.xai import (
+    plot_global_feature_importance,
+    plot_global_feature_importance_plotly,
+    plot_shap_waterfall,
+    plot_shap_waterfall_plotly,
+)
+
 
 def _format_p_val_display(p: float) -> str:
     """Format exact p-value for display in clinical forest plot table."""
