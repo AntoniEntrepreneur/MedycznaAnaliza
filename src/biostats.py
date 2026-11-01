@@ -1,9 +1,10 @@
 """Biostatistical hypothesis testing and descriptive Table 1 generator."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from scipy import stats
+import statsmodels.formula.api as smf
 
 DEFAULT_CONTINUOUS_VARS = ["age", "avg_glucose_level", "bmi"]
 DEFAULT_CATEGORICAL_VARS = [
@@ -388,3 +389,184 @@ def print_table_one(table_df: pd.DataFrame, title: Optional[str] = None) -> None
     if title:
         print(f"\n{'=' * len(title)}\n{title}\n{'=' * len(title)}")
     print(table_one_to_markdown(table_df, group_variables=True))
+
+
+# Multivariable Logistic Regression and Forest Plot Data Preparation
+
+COVARIATE_LABELS_PL: Dict[str, str] = {
+    "hypertension": "Nadciśnienie tętnicze",
+    "heart_disease": "Choroba serca",
+    "smoking_status_smokes": "Palenie: Aktywni palacze",
+    "smoking_status_formerly_smoked": "Palenie: Byli palacze",
+    "smoking_status_Unknown": "Palenie: Nieznane",
+    "gender_Male": "Płeć (Mężczyzna)",
+    "age": "Wiek (lata)",
+    "avg_glucose_level": "Poziom glukozy (mg/dl)",
+    "bmi": "BMI (kg/m²)",
+}
+
+PARAM_NAME_MAP: Dict[str, Tuple[str, str]] = {
+    'C(gender, Treatment(reference="Female"))[T.Male]': (
+        "gender_Male",
+        "Płeć (Mężczyzna)",
+    ),
+    'C(smoking_status, Treatment(reference="never smoked"))[T.smokes]': (
+        "smoking_status_smokes",
+        "Palenie: Aktywni palacze",
+    ),
+    'C(smoking_status, Treatment(reference="never smoked"))[T.formerly smoked]': (
+        "smoking_status_formerly_smoked",
+        "Palenie: Byli palacze",
+    ),
+    'C(smoking_status, Treatment(reference="never smoked"))[T.Unknown]': (
+        "smoking_status_Unknown",
+        "Palenie: Nieznane",
+    ),
+    "hypertension": ("hypertension", "Nadciśnienie tętnicze"),
+    "heart_disease": ("heart_disease", "Choroba serca"),
+    "age": ("age", "Wiek (lata)"),
+    "avg_glucose_level": ("avg_glucose_level", "Poziom glukozy (mg/dl)"),
+    "bmi": ("bmi", "BMI (kg/m²)"),
+}
+
+
+def _map_param_name(param: str) -> Tuple[str, str]:
+    """Map statsmodels formula term name to clean variable identifier and Polish label."""
+    if param in PARAM_NAME_MAP:
+        return PARAM_NAME_MAP[param]
+    if "gender" in param and "Male" in param:
+        return ("gender_Male", "Płeć (Mężczyzna)")
+    if "smoking_status" in param and "formerly" in param:
+        return ("smoking_status_formerly_smoked", "Palenie: Byli palacze")
+    if "smoking_status" in param and "smokes" in param:
+        return ("smoking_status_smokes", "Palenie: Aktywni palacze")
+    if "smoking_status" in param and "Unknown" in param:
+        return ("smoking_status_Unknown", "Palenie: Nieznane")
+    clean_var = (
+        param.replace("C(", "")
+        .replace(")", "")
+        .replace("[T.", "_")
+        .replace("]", "")
+    )
+    return (clean_var, COVARIATE_LABELS_PL.get(clean_var, clean_var))
+
+
+def fit_multivariable_logistic_regression(
+    df: Optional[pd.DataFrame] = None,
+    formula: Optional[str] = None,
+    bmi_imputation: str = "median",
+    alpha: float = 0.05,
+    filter_adults: bool = True,
+    remove_other_gender: bool = True,
+    return_model: bool = False,
+) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Any]]:
+    """Fit multivariable logistic regression on stroke risk cohort.
+
+    Evaluates core biological risk factors (age, avg_glucose_level, bmi,
+    hypertension, heart_disease, gender, smoking_status) while excluding
+    demographic proxies (work_type, Residence_type, ever_married) to prevent
+    collinearity.
+
+    Missing BMI values are handled via cohort median imputation by default
+    (avoiding loss of 40 adult stroke cases) or dropna.
+
+    Parameters
+    ----------
+    df : Optional[pd.DataFrame]
+        Cohort dataset. If None, loaded via get_curated_cohorts().
+    formula : Optional[str]
+        Statsmodels formula. Defaults to biological covariate model.
+    bmi_imputation : str, default 'median'
+        Strategy for missing BMI: 'median' or 'drop'.
+    alpha : float, default 0.05
+        Significance threshold for Wald confidence intervals and p-value flag.
+    filter_adults : bool, default True
+        Whether to filter for adults (age >= 18).
+    remove_other_gender : bool, default True
+        Whether to filter out singleton 'Other' gender.
+    return_model : bool, default False
+        Whether to return tuple of (results_df, fitted_model).
+
+    Returns
+    -------
+    pd.DataFrame or Tuple[pd.DataFrame, Any]
+        DataFrame with columns: variable, label_pl, coef, std_err, z_value,
+        p_value, or, ci_lower, ci_upper, is_significant.
+    """
+    if df is None:
+        from src.data import get_curated_cohorts
+
+        cohorts = get_curated_cohorts()
+        working_df = cohorts.adult.copy()
+    else:
+        working_df = df.copy()
+
+    if filter_adults and "age" in working_df.columns:
+        working_df = working_df[working_df["age"] >= 18.0].copy()
+
+    if remove_other_gender and "gender" in working_df.columns:
+        working_df = working_df[working_df["gender"] != "Other"].copy()
+
+    if "bmi" in working_df.columns:
+        if bmi_imputation == "median":
+            median_bmi = float(working_df["bmi"].median())
+            working_df["bmi"] = working_df["bmi"].fillna(median_bmi)
+        elif bmi_imputation == "drop":
+            working_df = working_df.dropna(subset=["bmi"]).copy()
+        else:
+            raise ValueError(
+                f"Unsupported bmi_imputation: {bmi_imputation}. Use 'median' or 'drop'."
+            )
+
+    if formula is None:
+        formula = (
+            "stroke ~ age + avg_glucose_level + bmi + hypertension + heart_disease "
+            '+ C(gender, Treatment(reference="Female")) '
+            '+ C(smoking_status, Treatment(reference="never smoked"))'
+        )
+
+    model = smf.logit(formula=formula, data=working_df).fit(disp=False)
+    conf_int = model.conf_int(alpha=alpha)
+    params = model.params
+    bse = model.bse
+    tvalues = model.tvalues
+    pvalues = model.pvalues
+
+    records: List[Dict[str, Any]] = []
+    for term in params.index:
+        if term == "Intercept":
+            continue
+        var_name, label_pl = _map_param_name(term)
+        coef = float(params[term])
+        std_err = float(bse[term])
+        z_val = float(tvalues[term])
+        p_val = float(pvalues[term])
+        odds_ratio = float(np.exp(coef))
+        ci_l = float(np.exp(conf_int.loc[term, 0]))
+        ci_u = float(np.exp(conf_int.loc[term, 1]))
+        is_sig = bool(p_val < alpha)
+
+        records.append({
+            "variable": var_name,
+            "label_pl": label_pl,
+            "coef": coef,
+            "std_err": std_err,
+            "z_value": z_val,
+            "p_value": p_val,
+            "or": odds_ratio,
+            "ci_lower": ci_l,
+            "ci_upper": ci_u,
+            "is_significant": is_sig,
+        })
+
+    results_df = (
+        pd.DataFrame(records)
+        .sort_values(by="or", ascending=False)
+        .reset_index(drop=True)
+    )
+    results_df.attrs["model"] = model
+    results_df.attrs["formula"] = formula
+
+    if return_model:
+        return results_df, model
+    return results_df
