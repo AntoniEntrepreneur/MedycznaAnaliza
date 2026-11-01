@@ -19,6 +19,18 @@ from src.biostats import (
 from src.visualization import (
     plot_forest_matplotlib,
     plot_forest_plotly,
+    plot_global_feature_importance,
+    plot_global_feature_importance_plotly,
+    plot_shap_waterfall,
+    plot_shap_waterfall_plotly,
+)
+from src.xai import (
+    get_feature_importances,
+    get_tree_explainer,
+    compute_shap_values,
+    get_clinical_archetypes,
+    FEATURE_LABELS_PL,
+    format_feature_label_pl,
 )
 from src.ml import (
     build_preprocessor,
@@ -47,6 +59,16 @@ __all__ = [
     "COVARIATE_LABELS_PL",
     "plot_forest_matplotlib",
     "plot_forest_plotly",
+    "plot_global_feature_importance",
+    "plot_global_feature_importance_plotly",
+    "plot_shap_waterfall",
+    "plot_shap_waterfall_plotly",
+    "get_feature_importances",
+    "get_tree_explainer",
+    "compute_shap_values",
+    "get_clinical_archetypes",
+    "FEATURE_LABELS_PL",
+    "format_feature_label_pl",
     "build_preprocessor",
     "get_model_catalog",
     "optimize_threshold",
