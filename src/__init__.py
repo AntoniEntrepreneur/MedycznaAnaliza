@@ -13,6 +13,12 @@ from src.biostats import (
     table_one_to_markdown,
     table_one_to_html,
     print_table_one,
+    fit_multivariable_logistic_regression,
+    COVARIATE_LABELS_PL,
+)
+from src.visualization import (
+    plot_forest_matplotlib,
+    plot_forest_plotly,
 )
 from src.ml import (
     build_preprocessor,
@@ -37,6 +43,10 @@ __all__ = [
     "table_one_to_markdown",
     "table_one_to_html",
     "print_table_one",
+    "fit_multivariable_logistic_regression",
+    "COVARIATE_LABELS_PL",
+    "plot_forest_matplotlib",
+    "plot_forest_plotly",
     "build_preprocessor",
     "get_model_catalog",
     "optimize_threshold",
