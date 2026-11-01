@@ -1,10 +1,14 @@
 """Reusable visual components for clinical risk dashboard."""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from src.population import (
+    calculate_patient_percentiles,
+    plot_population_risk_distribution,
+)
 
 
 def get_risk_tier(prob: float) -> Dict[str, str]:
@@ -159,3 +163,94 @@ def render_shap_waterfall(contributions_df: pd.DataFrame, max_features: int = 7)
 
     st.pyplot(fig, use_container_width=True)
     plt.close(fig)
+
+
+def render_population_bento_card(
+    patient_risk: float,
+    patient_age: float,
+    baseline_df: Optional[pd.DataFrame] = None,
+):
+    """Render population risk distribution Bento card with dual percentile benchmarks in Ice-Sky styling."""
+    percentiles = calculate_patient_percentiles(
+        patient_risk=patient_risk,
+        patient_age=patient_age,
+        baseline_df=baseline_df,
+    )
+    decade_label = percentiles["decade_label"]
+    decade_pct = percentiles["decade_percentile"]
+    overall_pct = percentiles["overall_percentile"]
+    interp = percentiles["interpretation"]
+
+    st.markdown(
+        """
+        <div class="clinic-card" style="background-color: #caf0fe; border-radius: 24px; padding: 22px; border: 1px solid #bae6fd; margin-bottom: 18px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <div style="font-weight: 800; font-size: 1.15rem; color: #0f172a;">
+                    🏛️ Kontekst Populacyjny i Benchmarki Centylowe
+                </div>
+                <span style="font-size: 0.8rem; background: #ffffff; padding: 3px 10px; border-radius: 999px; font-weight: 600; color: #0369a1; border: 1px solid #bae6fd;">
+                    N = 4 253 dorosłych
+                </span>
+            </div>
+            <div style="font-size: 0.85rem; color: #475569; margin-bottom: 14px;">
+                Pozycja pacjenta na tle empirycznego rozkładu ryzyka w referencyjnej kohorcie dorosłych oraz w adekwatnej dekadzie wieku.
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    m1, m2 = st.columns(2)
+    with m1:
+        st.markdown(
+            f"""
+            <div style="background: rgba(255, 255, 255, 0.75); border-radius: 16px; padding: 14px; border: 1px solid #bae6fd; text-align: center;">
+                <div style="font-size: 0.78rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Centyl w dekadzie wieku ({decade_label})
+                </div>
+                <div style="font-size: 2.1rem; font-weight: 800; color: #7c3aed; margin-top: 4px;">
+                    {decade_pct:.1f}%
+                </div>
+                <div style="font-size: 0.78rem; color: #475569; margin-top: 2px;">
+                    Ryzyko wyższe niż u <strong>{decade_pct:.1f}%</strong> rówieśników
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with m2:
+        st.markdown(
+            f"""
+            <div style="background: rgba(255, 255, 255, 0.75); border-radius: 16px; padding: 14px; border: 1px solid #bae6fd; text-align: center;">
+                <div style="font-size: 0.78rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Centyl w populacji ogólnej dorosłych
+                </div>
+                <div style="font-size: 2.1rem; font-weight: 800; color: #1d4ed8; margin-top: 4px;">
+                    {overall_pct:.1f}%
+                </div>
+                <div style="font-size: 0.78rem; color: #475569; margin-top: 2px;">
+                    Ryzyko wyższe niż u <strong>{overall_pct:.1f}%</strong> całej populacji
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f"""
+        <div style="background: rgba(255, 255, 255, 0.88); border-left: 4px solid #2563eb; border-radius: 10px; padding: 12px 16px; margin-top: 14px; margin-bottom: 12px; font-size: 0.88rem; color: #1e293b; line-height: 1.45;">
+            💬 <strong>Komentarz dla pacjenta:</strong> {interp}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    fig = plot_population_risk_distribution(
+        patient_risk=patient_risk,
+        baseline_df=baseline_df,
+        patient_age=patient_age,
+        title="Rozkład Ryzyka w Populacji Dorosłych i Grupie Rówieśniczej",
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
