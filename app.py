@@ -20,6 +20,7 @@ from src.app.components import (
 from src.population import calculate_patient_percentiles
 from src.ml import load_production_pipeline, predict_stroke_risk
 from src.vascular_age import calculate_vascular_age
+from src.trajectory import calculate_age_risk_trajectory, plot_age_risk_trajectory
 from src.visualization import (
     plot_global_feature_importance_plotly,
     plot_shap_waterfall_plotly,
@@ -313,21 +314,21 @@ def main() -> None:
         # --- POPULATION RISK DISTRIBUTION CARD (Ticket #27) ---
         render_population_bento_card(patient_risk=prob, patient_age=patient["age"])
 
-        # --- WHAT-IF SENSITIVITY SIMULATOR ---
+        # --- WHAT-IF SENSITIVITY SIMULATOR & 15-YEAR AGE TRAJECTORY (Ticket #28) ---
         st.markdown(
             """
             <div class="clinic-card">
                 <div style="font-weight: 700; font-size: 1.15rem; color: #0f172a; margin-bottom: 4px;">
-                    🔮 Symulator Wrażliwości i Celów Terapeutycznych (What-If Analysis)
+                    🔮 Symulator Wrażliwości i Celów Terapeutycznych (What-If Sensitivity Simulator)
                 </div>
                 <div style="font-size: 0.85rem; color: #475569; margin-bottom: 16px;">
-                    Przetestuj wpływ potencjalnych modyfikacji stylu życia i leczenia farmakologicznego na prognozowane ryzyko.
+                    Przetestuj wpływ potencjalnych modyfikacji stylu życia i leczenia farmakologicznego na prognozowane ryzyko oraz 15-letnią trajektorię narastania ryzyka.
                 </div>
             """,
             unsafe_allow_html=True,
         )
 
-        w1, w2, w3 = st.columns(3)
+        w1, w2, w3, w4 = st.columns(4)
         with w1:
             sim_glucose = st.slider(
                 "Cel glukozy (mg/dL):",
@@ -353,12 +354,33 @@ def main() -> None:
                 index=0 if smoking == "never smoked" else 1,
                 key="sim_smoking",
             )
+        with w4:
+            st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+            if hypertension:
+                sim_htn_control = st.checkbox(
+                    "Kontrola ciśnienia tętniczego (RR < 130/80 mmHg)",
+                    value=True,
+                    key="sim_htn",
+                    help="Wdrożenie optymalnej farmakoterapii hipotensyjnej normalizuje ryzyko naczyniowe.",
+                )
+            else:
+                sim_htn_control = st.checkbox(
+                    "Kontrola ciśnienia tętniczego (RR < 130/80 mmHg)",
+                    value=True,
+                    disabled=True,
+                    key="sim_htn",
+                    help="Pacjent ma już prawidłowe ciśnienie tętnicze w wywiadzie.",
+                )
 
         sim_patient = patient.copy()
         sim_patient["avg_glucose_level"] = float(sim_glucose)
         sim_patient["bmi"] = float(sim_bmi)
         if sim_smoking == "never smoked":
             sim_patient["smoking_status"] = "never smoked"
+        if hypertension:
+            sim_patient["hypertension"] = 0 if sim_htn_control else 1
+        else:
+            sim_patient["hypertension"] = 0
 
         if pipeline_artifact is not None:
             sim_risk_out = predict_stroke_risk(pipeline_artifact, sim_patient)
@@ -366,8 +388,26 @@ def main() -> None:
         else:
             sim_prob, _ = predict_patient_risk(sim_patient)
 
-        arr = (prob - sim_prob) * 100
-        rrr = ((prob - sim_prob) / prob) * 100 if prob > 0 else 0
+        # Guarantee non-negative ARR for clinically improved profiles
+        is_clinically_improved = (
+            sim_patient["avg_glucose_level"] <= patient["avg_glucose_level"] + 1e-4
+            and sim_patient["bmi"] <= patient["bmi"] + 1e-4
+            and sim_patient["hypertension"] <= patient["hypertension"]
+            and (
+                sim_patient["smoking_status"] == patient["smoking_status"]
+                or sim_patient["smoking_status"] == "never smoked"
+                or (patient["smoking_status"] == "smokes" and sim_patient["smoking_status"] == "formerly smoked")
+            )
+        )
+        if is_clinically_improved:
+            sim_prob = min(sim_prob, prob)
+
+        arr = (prob - sim_prob) * 100.0
+        if is_clinically_improved:
+            arr = max(0.0, arr)
+        rrr = ((prob - sim_prob) / prob) * 100.0 if prob > 0 else 0.0
+        if is_clinically_improved:
+            rrr = max(0.0, rrr)
 
         sim_c1, sim_c2, sim_c3 = st.columns(3)
         with sim_c1:
@@ -386,12 +426,41 @@ def main() -> None:
         else:
             st.info("Biomarkery są już w optymalnym zakresie docelowym.")
 
+        # Interactive 15-year Age Risk Trajectory Curve
+        st.markdown("<hr style='margin: 18px 0 14px 0; border: none; border-top: 1px solid #bae6fd;'>", unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div style="font-weight: 700; font-size: 1.05rem; color: #0f172a; margin-bottom: 2px;">
+                📈 15-Letnia Trajektoria Wieku i Ryzyka (Status Quo vs. Aktywna Interwencja)
+            </div>
+            <div style="font-size: 0.82rem; color: #475569; margin-bottom: 12px;">
+                Prognoza narastania ryzyka w czasie z uwzględnieniem luki protekcyjnej wynikającej z kontroli biomarkerów.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        trajectory_df = calculate_age_risk_trajectory(
+            patient_current=patient,
+            patient_target=sim_patient,
+            pipeline_artifact=pipeline_artifact,
+            years_ahead=15,
+            max_age=85.0,
+        )
+        fig_trajectory = plot_age_risk_trajectory(
+            trajectory_df=trajectory_df,
+            optimal_threshold=optimal_th,
+            title="15-Letnia Trajektoria Ryzyka Udaru Mózgu",
+        )
+        st.plotly_chart(fig_trajectory, use_container_width=True)
+
         st.markdown("</div>", unsafe_allow_html=True)
 
         # --- COLLAPSIBLE FORMATTED EHR NOTE ---
         with st.expander("📋 Exportable Clinical Consultation Note (EHR Ready)", expanded=False):
             top_driver = contributions.iloc[0]
             pop_benchmarks = calculate_patient_percentiles(prob, patient["age"])
+            last_traj = trajectory_df.iloc[-1]
             ehr_body = (
                 f"STROKE RISK STRATIFICATION & CLINICAL DECISION SUPPORT NOTE\n"
                 f"---------------------------------------------------\n"
@@ -410,9 +479,10 @@ def main() -> None:
                 f"- Population Percentile Benchmarks: {pop_benchmarks['decade_percentile']:.1f}% ({pop_benchmarks['decade_label']}) | {pop_benchmarks['overall_percentile']:.1f}% (Adult Cohort Overall)\n"
                 f"- Primary Risk Contributor: {top_driver['feature']} ({top_driver['value']}) with SHAP impact +{top_driver['shap_value']:.2f}\n\n"
                 f"INTERVENTION GOALS & PROJECTED RISK REDUCTION:\n"
-                f"- Target Glucose: {sim_glucose:.0f} mg/dL | Target BMI: {sim_bmi:.1f} | Smoking: {sim_smoking}\n"
+                f"- Target Glucose: {sim_glucose:.0f} mg/dL | Target BMI: {sim_bmi:.1f} | Smoking: {sim_smoking} | BP Control: {'Targeted (<130/80)' if sim_patient['hypertension'] == 0 else 'Uncontrolled'}\n"
                 f"- Projected Post-Intervention Risk: {sim_prob * 100:.1f}%\n"
                 f"- Absolute Risk Reduction (ARR): {arr:.1f}% | Relative Risk Reduction (RRR): {rrr:.1f}%\n"
+                f"- 15-Year Trajectory Deferred Risk Gap: {last_traj['arr_pct']:.1f}% ARR at age {last_traj['age']:.0f} (RRR: {last_traj['rrr_pct']:.0f}%)\n"
                 f"- Clinical Recommendation: {tier['recommendation']}\n"
             )
             st.markdown('<div class="ehr-note-area">', unsafe_allow_html=True)

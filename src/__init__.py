@@ -53,6 +53,10 @@ from src.population import (
 from src.vascular_age import (
     calculate_vascular_age,
 )
+from src.trajectory import (
+    calculate_age_risk_trajectory,
+    plot_age_risk_trajectory,
+)
 
 __all__ = [
     "load_data",
@@ -94,4 +98,6 @@ __all__ = [
     "plot_population_risk_distribution",
     "get_age_decade_label",
     "calculate_vascular_age",
+    "calculate_age_risk_trajectory",
+    "plot_age_risk_trajectory",
 ]
