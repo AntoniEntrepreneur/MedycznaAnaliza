@@ -57,6 +57,10 @@ from src.trajectory import (
     calculate_age_risk_trajectory,
     plot_age_risk_trajectory,
 )
+from src.app.print_sheet import (
+    generate_printable_html,
+    render_printable_consultation,
+)
 
 __all__ = [
     "load_data",
@@ -100,4 +104,6 @@ __all__ = [
     "calculate_vascular_age",
     "calculate_age_risk_trajectory",
     "plot_age_risk_trajectory",
+    "generate_printable_html",
+    "render_printable_consultation",
 ]

@@ -17,6 +17,7 @@ from src.app.components import (
     render_population_bento_card,
     get_risk_tier,
 )
+from src.app.print_sheet import render_printable_consultation
 from src.population import calculate_patient_percentiles
 from src.ml import load_production_pipeline, predict_stroke_risk
 from src.vascular_age import calculate_vascular_age
@@ -71,6 +72,28 @@ st.markdown(
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
         font-size: 0.85rem !important;
         line-height: 1.4 !important;
+    }
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+        #printable-consultation, #printable-consultation * {
+            visibility: visible;
+        }
+        #printable-consultation {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .no-print, header, footer, [data-testid="stSidebar"], [data-testid="stHeader"] {
+            display: none !important;
+        }
+        @page {
+            size: A4 portrait;
+            margin: 10mm;
+        }
     }
     </style>
     """,
@@ -488,6 +511,21 @@ def main() -> None:
             st.markdown('<div class="ehr-note-area">', unsafe_allow_html=True)
             st.text_area("Copy into Clinical Health Record:", ehr_body, height=220)
             st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- 1-CLICK PRINTABLE CONSULTATION HANDOUT (A4 POLISH SHEET) ---
+        render_printable_consultation(
+            patient=patient,
+            prob=prob,
+            optimal_th=optimal_th,
+            tier=tier,
+            vasc_age=vasc_age,
+            delta_age=delta_age,
+            rejuv_potential=rejuv_potential,
+            sim_patient=sim_patient,
+            sim_prob=sim_prob,
+            arr=arr,
+            rrr=rrr,
+        )
 
     with tab_xai:
         # --- TAB 2: EXPLAINABLE AI (XAI) CLINICAL DASHBOARD ---
