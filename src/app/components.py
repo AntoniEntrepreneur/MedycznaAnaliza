@@ -6,113 +6,57 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from src.visualization import create_risk_gauge
+
 
 def get_risk_tier(prob: float) -> Dict[str, str]:
     """Return risk classification tier, styling colors, and clinical guidance."""
-    pct = prob * 100
+    pct = prob * 100 if prob <= 1.0 else prob
     if pct < 10.0:
         return {
             "tier": "Low Risk",
+            "tier_pl": "Niskie",
             "color": "#16a34a",
             "bg": "#dcfce7",
             "border": "#86efac",
-            "recommendation": "Routine preventive care; monitor lifestyle factors at next regular annual visit.",
+            "cutoff_range": "< 10%",
+            "recommendation": "Rutynowa profilaktyka i nadzór stylu życia. Kolejna ocena ryzyka podczas planowej wizyty rocznej.",
         }
     elif pct < 25.0:
         return {
             "tier": "Moderate Risk",
+            "tier_pl": "Umiarkowane",
             "color": "#ca8a04",
             "bg": "#fef9c3",
             "border": "#fde047",
-            "recommendation": "Schedule 6-month clinical review. Initiate targeted diet, exercise, and lipid monitoring.",
-        }
-    elif pct < 50.0:
-        return {
-            "tier": "High Risk",
-            "color": "#ea580c",
-            "bg": "#ffedd5",
-            "border": "#fdba74",
-            "recommendation": "Expedited clinical evaluation. Consider aggressive blood pressure and glucose pharmacotherapy.",
+            "cutoff_range": "10% - 25%",
+            "recommendation": "Zalecana kontrola kliniczna za 6 miesięcy. Wdrożenie niefarmakologicznej modyfikacji czynników ryzyka (dieta, aktywność fizyczna, monitorowanie ciśnienia tętniczego i glikemii).",
         }
     else:
         return {
-            "tier": "Critical Risk",
+            "tier": "High Risk",
+            "tier_pl": "Wysokie",
             "color": "#dc2626",
             "bg": "#fee2e2",
             "border": "#fca5a5",
-            "recommendation": "Urgent neurological and cardiovascular assessment. Immediate comprehensive risk reduction protocol.",
+            "cutoff_range": "≥ 25%",
+            "recommendation": "Wskazana pilna konsultacja specjalistyczna (neurologiczna/kardiologiczna). Rozważenie agresywnej farmakoterapii przeciwnadciśnieniowej i hipolipemizującej.",
         }
 
 
-def render_risk_gauge(prob: float, title: str = "5-Year Stroke Risk Estimate"):
-    """Render a semicircular polar gauge meter showing colored risk zones and indicator needle."""
-    pct = np.clip(prob * 100, 0, 100)
-    tier_info = get_risk_tier(prob)
-
-    fig, ax = plt.subplots(figsize=(6, 3.2), subplot_kw={"projection": "polar"})
-    fig.patch.set_facecolor("#caf0fe")
-    ax.set_facecolor("#caf0fe")
-
-    categories = [
-        ("Low", 0, 10, "#22c55e"),
-        ("Moderate", 10, 25, "#eab308"),
-        ("High", 25, 50, "#f97316"),
-        ("Critical", 50, 100, "#ef4444"),
-    ]
-
-    for _, start_pct, end_pct, color in categories:
-        theta_start = np.pi - (start_pct / 100.0) * np.pi
-        theta_end = np.pi - (end_pct / 100.0) * np.pi
-        theta = np.linspace(theta_start, theta_end, 50)
-        ax.fill_between(theta, 0.65, 0.95, color=color, alpha=0.88, zorder=2)
-
-    needle_theta = np.pi - (pct / 100.0) * np.pi
-    ax.annotate(
-        "",
-        xy=(needle_theta, 0.9),
-        xytext=(0, 0),
-        arrowprops=dict(
-            arrowstyle="-|>",
-            color="#0f172a",
-            lw=3.5,
-            mutation_scale=18,
-        ),
-        zorder=5,
+def render_risk_gauge(
+    prob: float,
+    title: str = "5-Year Stroke Risk Estimate",
+    optimal_threshold: float = 0.07,
+    default_threshold: float = 0.50,
+):
+    """Render a semicircular polar gauge meter showing colored risk zones and dual thresholds."""
+    fig = create_risk_gauge(
+        risk_prob=prob,
+        optimal_threshold=optimal_threshold,
+        default_threshold=default_threshold,
     )
-
-    ax.plot(0, 0, marker="o", markersize=14, color="#0f172a", zorder=6)
-    ax.plot(0, 0, marker="o", markersize=8, color="#ffffff", zorder=7)
-
-    ax.set_thetamin(0)
-    ax.set_thetamax(180)
-    ax.set_theta_zero_location("E")
-    ax.set_theta_direction(1)
-    ax.set_ylim(0, 1.05)
-    ax.axis("off")
-
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
-
-    st.markdown(
-        f"""
-        <div style="text-align: center; margin-top: -12px; margin-bottom: 8px;">
-            <span style="font-size: 2.2rem; font-weight: 800; color: {tier_info['color']};">
-                {pct:.1f}%
-            </span>
-            <div style="margin-top: 4px;">
-                <span style="display: inline-block; padding: 4px 14px; border-radius: 9999px; 
-                             background-color: {tier_info['bg']}; color: {tier_info['color']}; 
-                             border: 1px solid {tier_info['border']}; font-weight: 700; font-size: 0.9rem;">
-                    {tier_info['tier']}
-                </span>
-            </div>
-            <p style="font-size: 0.84rem; color: #475569; margin-top: 6px; font-weight: 500;">
-                {tier_info['recommendation']}
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_shap_waterfall(contributions_df: pd.DataFrame, max_features: int = 7):
