@@ -1,118 +1,66 @@
 """Reusable visual components for clinical risk dashboard."""
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from src.population import (
+    calculate_patient_percentiles,
+    plot_population_risk_distribution,
+)
+
+from src.visualization import create_risk_gauge
 
 
 def get_risk_tier(prob: float) -> Dict[str, str]:
     """Return risk classification tier, styling colors, and clinical guidance."""
-    pct = prob * 100
+    pct = prob * 100 if prob <= 1.0 else prob
     if pct < 10.0:
         return {
             "tier": "Low Risk",
+            "tier_pl": "Niskie",
             "color": "#16a34a",
             "bg": "#dcfce7",
             "border": "#86efac",
-            "recommendation": "Routine preventive care; monitor lifestyle factors at next regular annual visit.",
+            "cutoff_range": "< 10%",
+            "recommendation": "Rutynowa profilaktyka i nadzór stylu życia. Kolejna ocena ryzyka podczas planowej wizyty rocznej.",
         }
     elif pct < 25.0:
         return {
             "tier": "Moderate Risk",
+            "tier_pl": "Umiarkowane",
             "color": "#ca8a04",
             "bg": "#fef9c3",
             "border": "#fde047",
-            "recommendation": "Schedule 6-month clinical review. Initiate targeted diet, exercise, and lipid monitoring.",
-        }
-    elif pct < 50.0:
-        return {
-            "tier": "High Risk",
-            "color": "#ea580c",
-            "bg": "#ffedd5",
-            "border": "#fdba74",
-            "recommendation": "Expedited clinical evaluation. Consider aggressive blood pressure and glucose pharmacotherapy.",
+            "cutoff_range": "10% - 25%",
+            "recommendation": "Zalecana kontrola kliniczna za 6 miesięcy. Wdrożenie niefarmakologicznej modyfikacji czynników ryzyka (dieta, aktywność fizyczna, monitorowanie ciśnienia tętniczego i glikemii).",
         }
     else:
         return {
-            "tier": "Critical Risk",
+            "tier": "High Risk",
+            "tier_pl": "Wysokie",
             "color": "#dc2626",
             "bg": "#fee2e2",
             "border": "#fca5a5",
-            "recommendation": "Urgent neurological and cardiovascular assessment. Immediate comprehensive risk reduction protocol.",
+            "cutoff_range": "≥ 25%",
+            "recommendation": "Wskazana pilna konsultacja specjalistyczna (neurologiczna/kardiologiczna). Rozważenie agresywnej farmakoterapii przeciwnadciśnieniowej i hipolipemizującej.",
         }
 
 
-def render_risk_gauge(prob: float, title: str = "5-Year Stroke Risk Estimate"):
-    """Render a semicircular polar gauge meter showing colored risk zones and indicator needle."""
-    pct = np.clip(prob * 100, 0, 100)
-    tier_info = get_risk_tier(prob)
-
-    fig, ax = plt.subplots(figsize=(6, 3.2), subplot_kw={"projection": "polar"})
-    fig.patch.set_facecolor("#caf0fe")
-    ax.set_facecolor("#caf0fe")
-
-    categories = [
-        ("Low", 0, 10, "#22c55e"),
-        ("Moderate", 10, 25, "#eab308"),
-        ("High", 25, 50, "#f97316"),
-        ("Critical", 50, 100, "#ef4444"),
-    ]
-
-    for _, start_pct, end_pct, color in categories:
-        theta_start = np.pi - (start_pct / 100.0) * np.pi
-        theta_end = np.pi - (end_pct / 100.0) * np.pi
-        theta = np.linspace(theta_start, theta_end, 50)
-        ax.fill_between(theta, 0.65, 0.95, color=color, alpha=0.88, zorder=2)
-
-    needle_theta = np.pi - (pct / 100.0) * np.pi
-    ax.annotate(
-        "",
-        xy=(needle_theta, 0.9),
-        xytext=(0, 0),
-        arrowprops=dict(
-            arrowstyle="-|>",
-            color="#0f172a",
-            lw=3.5,
-            mutation_scale=18,
-        ),
-        zorder=5,
+def render_risk_gauge(
+    prob: float,
+    title: str = "5-Year Stroke Risk Estimate",
+    optimal_threshold: float = 0.07,
+    default_threshold: float = 0.50,
+):
+    """Render a semicircular polar gauge meter showing colored risk zones and dual thresholds."""
+    fig = create_risk_gauge(
+        risk_prob=prob,
+        optimal_threshold=optimal_threshold,
+        default_threshold=default_threshold,
     )
-
-    ax.plot(0, 0, marker="o", markersize=14, color="#0f172a", zorder=6)
-    ax.plot(0, 0, marker="o", markersize=8, color="#ffffff", zorder=7)
-
-    ax.set_thetamin(0)
-    ax.set_thetamax(180)
-    ax.set_theta_zero_location("E")
-    ax.set_theta_direction(1)
-    ax.set_ylim(0, 1.05)
-    ax.axis("off")
-
-    st.pyplot(fig, use_container_width=True)
-    plt.close(fig)
-
-    st.markdown(
-        f"""
-        <div style="text-align: center; margin-top: -12px; margin-bottom: 8px;">
-            <span style="font-size: 2.2rem; font-weight: 800; color: {tier_info['color']};">
-                {pct:.1f}%
-            </span>
-            <div style="margin-top: 4px;">
-                <span style="display: inline-block; padding: 4px 14px; border-radius: 9999px; 
-                             background-color: {tier_info['bg']}; color: {tier_info['color']}; 
-                             border: 1px solid {tier_info['border']}; font-weight: 700; font-size: 0.9rem;">
-                    {tier_info['tier']}
-                </span>
-            </div>
-            <p style="font-size: 0.84rem; color: #475569; margin-top: 6px; font-weight: 500;">
-                {tier_info['recommendation']}
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def render_shap_waterfall(contributions_df: pd.DataFrame, max_features: int = 7):
@@ -159,3 +107,94 @@ def render_shap_waterfall(contributions_df: pd.DataFrame, max_features: int = 7)
 
     st.pyplot(fig, use_container_width=True)
     plt.close(fig)
+
+
+def render_population_bento_card(
+    patient_risk: float,
+    patient_age: float,
+    baseline_df: Optional[pd.DataFrame] = None,
+):
+    """Render population risk distribution Bento card with dual percentile benchmarks in Ice-Sky styling."""
+    percentiles = calculate_patient_percentiles(
+        patient_risk=patient_risk,
+        patient_age=patient_age,
+        baseline_df=baseline_df,
+    )
+    decade_label = percentiles["decade_label"]
+    decade_pct = percentiles["decade_percentile"]
+    overall_pct = percentiles["overall_percentile"]
+    interp = percentiles["interpretation"]
+
+    st.markdown(
+        """
+        <div class="clinic-card" style="background-color: #caf0fe; border-radius: 24px; padding: 22px; border: 1px solid #bae6fd; margin-bottom: 18px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                <div style="font-weight: 800; font-size: 1.15rem; color: #0f172a;">
+                    🏛️ Kontekst Populacyjny i Benchmarki Centylowe
+                </div>
+                <span style="font-size: 0.8rem; background: #ffffff; padding: 3px 10px; border-radius: 999px; font-weight: 600; color: #0369a1; border: 1px solid #bae6fd;">
+                    N = 4 253 dorosłych
+                </span>
+            </div>
+            <div style="font-size: 0.85rem; color: #475569; margin-bottom: 14px;">
+                Pozycja pacjenta na tle empirycznego rozkładu ryzyka w referencyjnej kohorcie dorosłych oraz w adekwatnej dekadzie wieku.
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    m1, m2 = st.columns(2)
+    with m1:
+        st.markdown(
+            f"""
+            <div style="background: rgba(255, 255, 255, 0.75); border-radius: 16px; padding: 14px; border: 1px solid #bae6fd; text-align: center;">
+                <div style="font-size: 0.78rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Centyl w dekadzie wieku ({decade_label})
+                </div>
+                <div style="font-size: 2.1rem; font-weight: 800; color: #7c3aed; margin-top: 4px;">
+                    {decade_pct:.1f}%
+                </div>
+                <div style="font-size: 0.78rem; color: #475569; margin-top: 2px;">
+                    Ryzyko wyższe niż u <strong>{decade_pct:.1f}%</strong> rówieśników
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with m2:
+        st.markdown(
+            f"""
+            <div style="background: rgba(255, 255, 255, 0.75); border-radius: 16px; padding: 14px; border: 1px solid #bae6fd; text-align: center;">
+                <div style="font-size: 0.78rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Centyl w populacji ogólnej dorosłych
+                </div>
+                <div style="font-size: 2.1rem; font-weight: 800; color: #1d4ed8; margin-top: 4px;">
+                    {overall_pct:.1f}%
+                </div>
+                <div style="font-size: 0.78rem; color: #475569; margin-top: 2px;">
+                    Ryzyko wyższe niż u <strong>{overall_pct:.1f}%</strong> całej populacji
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        f"""
+        <div style="background: rgba(255, 255, 255, 0.88); border-left: 4px solid #2563eb; border-radius: 10px; padding: 12px 16px; margin-top: 14px; margin-bottom: 12px; font-size: 0.88rem; color: #1e293b; line-height: 1.45;">
+            💬 <strong>Komentarz dla pacjenta:</strong> {interp}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    fig = plot_population_risk_distribution(
+        patient_risk=patient_risk,
+        baseline_df=baseline_df,
+        patient_age=patient_age,
+        title="Rozkład Ryzyka w Populacji Dorosłych i Grupie Rówieśniczej",
+    )
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
