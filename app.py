@@ -1,684 +1,236 @@
-"""Streamlit Clinical Risk Calculator — Medical Data Analysis (Stroke Prediction).
+"""Small Streamlit application for the shared stroke-analysis dataset."""
 
-Clinician decision support workstation validated in Spec #21.
-"""
+from typing import Any, Dict
 
-from typing import Dict, Any, Optional
+import pandas as pd
+import plotly.express as px
 import streamlit as st
-from src.app.presets import PATIENT_PRESETS, CATEGORICAL_OPTIONS
-from src.app.model import (
-    predict_patient_risk,
-    get_cached_global_importance,
-    get_cached_archetype_case_studies,
-)
-from src.app.components import (
-    render_risk_gauge,
-    render_shap_waterfall,
-    render_population_bento_card,
-    get_risk_tier,
-)
-from src.app.print_sheet import render_printable_consultation
-from src.population import calculate_patient_percentiles
+
+from src.config import LOCAL_RAW_DATA_PATH
+from src.data import DatasetValidationError, curate_stroke_data, load_data
 from src.ml import load_production_pipeline, predict_stroke_risk
-from src.vascular_age import calculate_vascular_age
-from src.trajectory import calculate_age_risk_trajectory, plot_age_risk_trajectory
-from src.visualization import (
-    plot_global_feature_importance_plotly,
-    plot_shap_waterfall_plotly,
-    plot_shap_waterfall,
-)
 
-# Page configuration
-st.set_page_config(
-    page_title="Clinical Stroke Risk Calculator",
-    page_icon="🩺",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
-# Custom validated styling (24px radius, #caf0fe ice-sky background)
-st.markdown(
-    """
-    <style>
-    .block-container {
-        padding-top: 1.8rem;
-        padding-bottom: 3.5rem;
-        max-width: 1200px;
-    }
-    .clinic-card {
-        background-color: #caf0fe;
-        border-radius: 24px;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
-        padding: 20px;
-        border: 1px solid #bae6fd;
-        margin-bottom: 20px;
-    }
-    .clinic-header {
-        font-size: 1.6rem;
-        font-weight: 800;
-        color: #0f172a;
-        margin-bottom: 0.2rem;
-    }
-    .clinic-subtitle {
-        font-size: 0.95rem;
-        color: #475569;
-        margin-bottom: 1.2rem;
-    }
-    .clinic-accent {
-        color: #0284c7;
-        font-weight: 700;
-    }
-    .ehr-note-area textarea {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-        font-size: 0.85rem !important;
-        line-height: 1.4 !important;
-    }
-    @media print {
-        body * {
-            visibility: hidden;
-        }
-        #printable-consultation, #printable-consultation * {
-            visibility: visible;
-        }
-        #printable-consultation {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            box-sizing: border-box;
-        }
-        .no-print, header, footer, [data-testid="stSidebar"], [data-testid="stHeader"] {
-            display: none !important;
-        }
-        @page {
-            size: A4 portrait;
-            margin: 10mm;
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+@st.cache_data
+def load_population() -> pd.DataFrame:
+    """Load the validated adult cohort used by the notebook and application."""
+    raw = load_data()
+    return curate_stroke_data(raw).adult
 
 
 @st.cache_resource
-def get_production_pipeline_artifact():
-    """Load and cache the trained production machine learning pipeline artifact."""
-    try:
-        return load_production_pipeline()
-    except Exception:
-        return None
+def train_pipeline(adult: pd.DataFrame) -> Dict[str, Any]:
+    """Train the runtime model from the same curated cohort."""
+    return load_production_pipeline(df_adult=adult)
+
+
+def render_dataset_error(error: Exception) -> None:
+    """Show an actionable dataset error instead of rendering an empty dashboard."""
+    st.error(f"Nie można uruchomić analizy: {error}")
+    st.info(
+        "Napraw dane i uruchom aplikację ponownie. Wymagany jest prawidłowy plik "
+        f"`{LOCAL_RAW_DATA_PATH}` z repozytorium."
+    )
+
+
+def validate_patient(patient: Dict[str, Any], feature_names: list[str]) -> list[str]:
+    """Return actionable validation messages for the submitted patient profile."""
+    errors = [
+        f"Brak wartości dla cechy „{feature}”."
+        for feature in feature_names
+        if feature not in patient or pd.isna(patient[feature])
+    ]
+    for feature in NUMERIC_CONTINUOUS_COLS:
+        value = patient.get(feature)
+        try:
+            valid_number = value is not None and pd.notna(value) and float(value) == float(value)
+        except (TypeError, ValueError):
+            valid_number = False
+        if not valid_number:
+            errors.append(f"Cecha „{feature}” musi być skończoną liczbą.")
+    if float(patient.get("age", 0)) < 18:
+        errors.append("Wiek musi wynosić co najmniej 18 lat, ponieważ model korzysta z kohorty dorosłych.")
+    if float(patient.get("avg_glucose_level", 0)) <= 0:
+        errors.append("Średni poziom glukozy musi być większy od 0.")
+    if float(patient.get("bmi", 0)) <= 0:
+        errors.append("BMI musi być większe od 0.")
+    return errors
+
+
+def _prevalence_by(df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Calculate stroke prevalence for a categorical or binary feature."""
+    result = (
+        df.groupby(column, dropna=False)["stroke"]
+        .agg(prevalence="mean", cohort_size="size")
+        .reset_index()
+    )
+    result["label"] = result[column].fillna("Brak danych").astype(str)
+    result["prevalence_percent"] = result["prevalence"] * 100
+    return result
+
+
+def render_population_view(adult: pd.DataFrame) -> None:
+    """Render a concise overview of the adult study population."""
+    st.header("Populacja badania")
+    st.caption(
+        "Opisowa analiza dorosłej kohorty po tej samej walidacji i kuracji danych, "
+        "które wykorzystuje notebook."
+    )
+
+    prevalence = float(adult["stroke"].mean())
+    stroke_group = adult[adult["stroke"] == 1]
+    control_group = adult[adult["stroke"] == 0]
+    hypertension = _prevalence_by(adult, "hypertension")
+
+    metric_1, metric_2, metric_3 = st.columns(3)
+    metric_1.metric("Liczebność kohorty", f"{len(adult):,}".replace(",", " "))
+    metric_2.metric("Przypadki udaru", f"{int(adult['stroke'].sum()):,}".replace(",", " "))
+    metric_3.metric("Prewalencja udaru", f"{prevalence:.2%}")
+
+    st.subheader("Najważniejsze ustalenia")
+    st.markdown(
+        "\n".join(
+            [
+                f"- Udar wystąpił u **{prevalence:.2%}** osób w kohorcie.",
+                f"- Mediana wieku wynosi **{stroke_group['age'].median():.1f} lat** "
+                f"w grupie udaru i **{control_group['age'].median():.1f} lat** w grupie bez udaru.",
+                f"- Prewalencja wśród osób z nadciśnieniem wynosi "
+                f"**{hypertension.loc[hypertension['hypertension'] == 1, 'prevalence_percent'].iloc[0]:.1f}%**.",
+            ]
+        )
+    )
+
+    left, right = st.columns(2)
+    with left:
+        age_plot = px.histogram(
+            adult,
+            x="age",
+            color=adult["stroke"].map({0: "Bez udaru", 1: "Udar"}),
+            nbins=24,
+            barmode="overlay",
+            opacity=0.75,
+            labels={"age": "Wiek", "count": "Liczba osób", "color": "Wynik"},
+            title="Rozkład wieku według wyniku",
+        )
+        age_plot.update_layout(legend_title_text="Wynik")
+        st.plotly_chart(age_plot, use_container_width=True)
+
+    with right:
+        age_bins = pd.cut(
+            adult["age"],
+            bins=[17, 40, 50, 60, 70, 120],
+            labels=["18–39", "40–49", "50–59", "60–69", "70+"],
+        )
+        age_prevalence = (
+            adult.assign(grupa_wiekowa=age_bins)
+            .groupby("grupa_wiekowa", observed=False)["stroke"]
+            .mean()
+            .mul(100)
+            .rename("prewalencja")
+            .reset_index()
+        )
+        age_plot = px.bar(
+            age_prevalence,
+            x="grupa_wiekowa",
+            y="prewalencja",
+            labels={"grupa_wiekowa": "Grupa wieku", "prewalencja": "Udar (%)"},
+            title="Prewalencja udaru według wieku",
+            text_auto=".1f",
+        )
+        st.plotly_chart(age_plot, use_container_width=True)
+
+    risk_factors = pd.concat(
+        [
+            _prevalence_by(adult, "hypertension").assign(czynnik="Nadciśnienie"),
+            _prevalence_by(adult, "heart_disease").assign(czynnik="Choroba serca"),
+        ],
+        ignore_index=True,
+    )
+    risk_factors["poziom"] = risk_factors["label"].map({"0": "Nie", "1": "Tak"}).fillna(risk_factors["label"])
+    factor_plot = px.bar(
+        risk_factors,
+        x="czynnik",
+        y="prevalence_percent",
+        color="poziom",
+        barmode="group",
+        labels={"czynnik": "Czynnik", "prevalence_percent": "Udar (%)", "poziom": "Obecność"},
+        title="Prewalencja udaru według czynników chorobowych",
+        text_auto=".1f",
+    )
+    st.plotly_chart(factor_plot, use_container_width=True)
+
+
+def render_patient_view(adult: pd.DataFrame, result: Dict[str, Any]) -> None:
+    """Render the second, deliberately small patient risk view."""
+    st.header("Kalkulator ryzyka pacjenta")
+    st.caption(
+        "To akademicki szacunek statystyczny, a nie diagnoza medyczna ani rekomendacja leczenia."
+    )
+
+    with st.form("patient_form"):
+        left, right = st.columns(2)
+        with left:
+            age = st.number_input("Wiek", min_value=18.0, max_value=110.0, value=60.0)
+            glucose = st.number_input("Średni poziom glukozy", min_value=0.0, value=100.0)
+            bmi = st.number_input("BMI", min_value=0.0, value=28.0)
+            gender = st.selectbox("Płeć", sorted(adult["gender"].dropna().unique()))
+            smoking = st.selectbox("Status palenia", sorted(adult["smoking_status"].dropna().unique()))
+        with right:
+            hypertension = st.checkbox("Nadciśnienie")
+            heart_disease = st.checkbox("Choroba serca")
+            married = st.selectbox("W związku małżeńskim", sorted(adult["ever_married"].dropna().unique()))
+            work_type = st.selectbox("Charakter pracy", sorted(adult["work_type"].dropna().unique()))
+            residence = st.selectbox("Miejsce zamieszkania", sorted(adult["Residence_type"].dropna().unique()))
+        submitted = st.form_submit_button("Oceń profil")
+
+    if submitted:
+        patient = {
+            "age": age,
+            "avg_glucose_level": glucose,
+            "bmi": bmi,
+            "gender": gender,
+            "smoking_status": smoking,
+            "hypertension": int(hypertension),
+            "heart_disease": int(heart_disease),
+            "ever_married": married,
+            "work_type": work_type,
+            "Residence_type": residence,
+        }
+        errors = validate_patient(patient, result["feature_names"])
+        if errors:
+            st.error("Nie można ocenić profilu:")
+            for error in errors:
+                st.write(f"- {error}")
+            return
+        try:
+            prediction = predict_stroke_risk(result, patient)
+        except (TypeError, ValueError, KeyError) as error:
+            st.error(f"Nie można obliczyć wyniku. Sprawdź dane wejściowe: {error}")
+            return
+        st.metric("Szacowane prawdopodobieństwo udaru", f"{prediction['probability_percent']:.1f}%")
+        st.write(
+            f"Reguła: prawdopodobieństwo **≥ próg** oznacza klasyfikację dodatnią. "
+            f"Próg maksimum F1: **{prediction['decision_threshold']:.3f}**. "
+            f"Klasyfikacja: **{'powyżej' if prediction['screening_positive'] else 'poniżej'} progu**."
+        )
 
 
 def main() -> None:
-    pipeline_artifact = get_production_pipeline_artifact()
-    optimal_th = pipeline_artifact.get("optimal_threshold", 0.07) if pipeline_artifact else 0.07
+    """Start the two-view population and patient application."""
+    st.set_page_config(page_title="Analiza populacji udaru", page_icon="🧪", layout="wide")
+    st.title("Analiza danych o udarze")
+    try:
+        adult = load_population()
+        model_result = train_pipeline(adult)
+    except (DatasetValidationError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:
+        render_dataset_error(error)
+        st.stop()
 
-    # --- SIDEBAR CONTROLS ---
-    st.sidebar.markdown(
-        """
-        <div style="padding: 10px 0 15px 0;">
-            <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a;">🩺 Profil Pacjenta</div>
-            <div style="font-size: 0.8rem; color: #64748b;">Elektroniczna Karta Pacjenta (POZ)</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    preset_names = list(PATIENT_PRESETS.keys())
-    selected_preset = st.sidebar.selectbox(
-        "Kliniczne Profile Wzorcowe (Presets):",
-        preset_names,
-        index=0,
-        help="Szybkie ładowanie predefiniowanych profili klinicznych.",
-    )
-
-    preset_data = PATIENT_PRESETS[selected_preset]
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### Dane Demograficzne")
-
-    gender_idx = CATEGORICAL_OPTIONS["gender"].index(preset_data["gender"])
-    gender = st.sidebar.selectbox("Płeć:", CATEGORICAL_OPTIONS["gender"], index=gender_idx)
-
-    age = st.sidebar.slider("Wiek:", min_value=18, max_value=85, value=int(preset_data["age"]), step=1)
-
-    ever_married_idx = CATEGORICAL_OPTIONS["ever_married"].index(preset_data["ever_married"])
-    ever_married = st.sidebar.selectbox("W związku małżeńskim:", CATEGORICAL_OPTIONS["ever_married"], index=ever_married_idx)
-
-    residence_idx = CATEGORICAL_OPTIONS["Residence_type"].index(preset_data["Residence_type"])
-    residence = st.sidebar.selectbox("Miejsce zamieszkania:", CATEGORICAL_OPTIONS["Residence_type"], index=residence_idx)
-
-    work_type_idx = CATEGORICAL_OPTIONS["work_type"].index(preset_data["work_type"])
-    work_type = st.sidebar.selectbox("Charakter pracy:", CATEGORICAL_OPTIONS["work_type"], index=work_type_idx)
-
-    st.sidebar.markdown("### Biomarkery Kliniczne")
-
-    glucose = st.sidebar.slider(
-        "Średni poziom glukozy (mg/dL):",
-        min_value=50.0,
-        max_value=300.0,
-        value=float(preset_data["avg_glucose_level"]),
-        step=1.0,
-    )
-
-    bmi = st.sidebar.slider(
-        "Wskaźnik masy ciała BMI (kg/m²):",
-        min_value=15.0,
-        max_value=60.0,
-        value=float(preset_data["bmi"]),
-        step=0.1,
-    )
-
-    st.sidebar.markdown("### Wywiad Chorobowy")
-
-    hypertension_val = bool(preset_data["hypertension"])
-    hypertension = st.sidebar.checkbox(
-        "Nadciśnienie tętnicze (Hypertension)",
-        value=hypertension_val,
-    )
-
-    heart_disease_val = bool(preset_data["heart_disease"])
-    heart_disease = st.sidebar.checkbox(
-        "Choroba wieńcowa / serca (Heart Disease)",
-        value=heart_disease_val,
-    )
-
-    smoking_idx = CATEGORICAL_OPTIONS["smoking_status"].index(preset_data["smoking_status"])
-    smoking = st.sidebar.selectbox(
-        "Status palenia tytoniu:",
-        CATEGORICAL_OPTIONS["smoking_status"],
-        index=smoking_idx,
-    )
-
-    # Current patient payload
-    patient: Dict[str, Any] = {
-        "gender": gender,
-        "age": float(age),
-        "hypertension": int(hypertension),
-        "heart_disease": int(heart_disease),
-        "ever_married": ever_married,
-        "work_type": work_type,
-        "Residence_type": residence,
-        "avg_glucose_level": float(glucose),
-        "bmi": float(bmi),
-        "smoking_status": smoking,
-    }
-
-    # Model prediction
-    if pipeline_artifact is not None:
-        risk_out = predict_stroke_risk(pipeline_artifact, patient)
-        prob = float(risk_out["probability"] if isinstance(risk_out, dict) else risk_out[0])
-        _, contributions = predict_patient_risk(patient)
+    view = st.sidebar.radio("Widok", ["Populacja", "Pacjent"])
+    if view == "Populacja":
+        render_population_view(adult)
     else:
-        prob, contributions = predict_patient_risk(patient)
-
-    tier = get_risk_tier(prob)
-    baseline_pop_rate = 0.0487  # ~4.87% population stroke rate in Kaggle dataset
-    relative_risk = prob / baseline_pop_rate
-
-    # Calculate vascular age via model inversion
-    vasc_res = calculate_vascular_age(
-        patient_risk=prob,
-        pipeline_artifact=pipeline_artifact,
-        chronological_age=float(patient["age"]),
-        patient_gender=patient["gender"],
-    )
-    vasc_age = vasc_res["vascular_age"]
-    delta_age = vasc_res["delta"]
-    rejuv_potential = vasc_res["rejuvenation_potential"]
-
-    # Top-level workstation navigation tabs
-    tab_calc, tab_xai = st.tabs(
-        ["🩺 Kalkulator Kliniczny", "🔬 Interpretowalność (XAI)"]
-    )
-
-    with tab_calc:
-        # --- TOP 4-KPI SUMMARY STRIP ---
-        k1, k2, k3, k4 = st.columns(4)
-        with k1:
-            st.markdown(
-                f"""
-                <div class="clinic-card" style="text-align: center;">
-                    <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">WIEK CHRONOLOGICZNY</div>
-                    <div style="font-size: 2.0rem; font-weight: 800; color: #0f172a; margin-top: 4px;">{patient['age']:.0f} lat</div>
-                    <div style="font-size: 0.78rem; color: #64748b; font-weight: 600; margin-top: 2px;">Metryka pacjenta ({patient['gender']})</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with k2:
-            threshold_tag = (
-                f"<span style='color: #dc2626;'>⚠️ > p* ({optimal_th * 100:.0f}%)</span>"
-                if prob >= optimal_th
-                else f"<span style='color: #16a34a;'>✅ ≤ p* ({optimal_th * 100:.0f}%)</span>"
-            )
-            st.markdown(
-                f"""
-                <div class="clinic-card" style="text-align: center;">
-                    <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">RYZYKO UDARU (5 LAT)</div>
-                    <div class="clinic-accent" style="font-size: 2.0rem; font-weight: 800; margin-top: 4px;">{prob * 100:.1f}%</div>
-                    <div style="font-size: 0.78rem; font-weight: 700; margin-top: 2px;">{threshold_tag}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with k3:
-            st.markdown(
-                f"""
-                <div class="clinic-card" style="text-align: center;">
-                    <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">KATEGORIA RYZYKA</div>
-                    <div style="margin-top: 6px;">
-                        <span style="display: inline-block; padding: 4px 14px; border-radius: 999px; background:{tier['bg']}; color:{tier['color']}; font-weight:800; font-size:1.1rem; border: 1px solid {tier['border']};">
-                            {tier['tier']}
-                        </span>
-                    </div>
-                    <div style="font-size: 0.76rem; color: #64748b; font-weight: 600; margin-top: 4px;">Przedział: {tier['cutoff_range']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with k4:
-            if delta_age > 0:
-                delta_badge = f"""<span style="display: inline-block; padding: 2px 7px; border-radius: 6px; background: #fee2e2; color: #dc2626; font-weight: 800; font-size: 0.82rem; border: 1px solid #fca5a5;">+{delta_age:.1f} lat</span>"""
-                framing_subtext = f"""<div style="font-size: 0.76rem; color: #2563eb; font-weight: 700; margin-top: 4px;">Potencjał Odmłodzenia: -{rejuv_potential:.1f} lat</div>"""
-            else:
-                delta_badge = f"""<span style="display: inline-block; padding: 2px 7px; border-radius: 6px; background: #dcfce7; color: #16a34a; font-weight: 800; font-size: 0.82rem; border: 1px solid #86efac;">{delta_age:.1f} lat</span>"""
-                framing_subtext = f"""<div style="font-size: 0.76rem; color: #16a34a; font-weight: 700; margin-top: 4px;">Optymalny profil naczyniowy</div>"""
-
-            st.markdown(
-                f"""
-                <div class="clinic-card" style="text-align: center;">
-                    <div style="font-size: 0.8rem; color: #475569; font-weight: 700; text-transform: uppercase;">WIEK NACZYNIOWY</div>
-                    <div style="font-size: 2.0rem; font-weight: 800; color: #0f172a; margin-top: 4px;">
-                        {vasc_age:.1f} lat {delta_badge}
-                    </div>
-                    {framing_subtext}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        # --- MAIN TWO-COLUMN WORKSTATION LAYOUT ---
-        col_left, col_right = st.columns([1, 1], gap="medium")
-
-        with col_left:
-            st.markdown(
-                """
-                <div class="clinic-card">
-                    <div style="font-weight: 700; font-size: 1.1rem; color: #0f172a; margin-bottom: 2px;">
-                        🎯 Obiektywne Oszacowanie Ryzyka Udaru
-                    </div>
-                    <div style="font-size: 0.83rem; color: #475569; margin-bottom: 12px;">
-                        Półkolisty wskaźnik polarny z odcięciem skriningowym F2 (p* = 7%) oraz progiem domyślnym (50%).
-                    </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            render_risk_gauge(prob, optimal_threshold=optimal_th)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with col_right:
-            st.markdown(
-                """
-                <div class="clinic-card">
-                    <div style="font-weight: 700; font-size: 1.1rem; color: #0f172a; margin-bottom: 2px;">
-                        🧬 Diagnostyka i Czynniki Ryzyka (SHAP)
-                    </div>
-                    <div style="font-size: 0.83rem; color: #475569; margin-bottom: 8px;">
-                        Wpływ poszczególnych cech na odchylenie ryzyka od średniej populacyjnej.
-                    </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            render_shap_waterfall(contributions)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- POPULATION RISK DISTRIBUTION CARD (Ticket #27) ---
-        render_population_bento_card(patient_risk=prob, patient_age=patient["age"])
-
-        # --- WHAT-IF SENSITIVITY SIMULATOR & 15-YEAR AGE TRAJECTORY (Ticket #28) ---
-        st.markdown(
-            """
-            <div class="clinic-card">
-                <div style="font-weight: 700; font-size: 1.15rem; color: #0f172a; margin-bottom: 4px;">
-                    🔮 Symulator Wrażliwości i Celów Terapeutycznych (What-If Sensitivity Simulator)
-                </div>
-                <div style="font-size: 0.85rem; color: #475569; margin-bottom: 16px;">
-                    Przetestuj wpływ potencjalnych modyfikacji stylu życia i leczenia farmakologicznego na prognozowane ryzyko oraz 15-letnią trajektorię narastania ryzyka.
-                </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        w1, w2, w3, w4 = st.columns(4)
-        with w1:
-            sim_glucose = st.slider(
-                "Cel glukozy (mg/dL):",
-                50.0,
-                250.0,
-                min(float(glucose), 100.0),
-                step=5.0,
-                key="sim_glucose",
-            )
-        with w2:
-            sim_bmi = st.slider(
-                "Cel BMI (kg/m²):",
-                18.5,
-                45.0,
-                min(float(bmi), 24.5),
-                step=0.5,
-                key="sim_bmi",
-            )
-        with w3:
-            sim_smoking = st.selectbox(
-                "Modyfikacja palenia:",
-                ["Zachowaj obecny", "never smoked"],
-                index=0 if smoking == "never smoked" else 1,
-                key="sim_smoking",
-            )
-        with w4:
-            st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
-            if hypertension:
-                sim_htn_control = st.checkbox(
-                    "Kontrola ciśnienia tętniczego (RR < 130/80 mmHg)",
-                    value=True,
-                    key="sim_htn",
-                    help="Wdrożenie optymalnej farmakoterapii hipotensyjnej normalizuje ryzyko naczyniowe.",
-                )
-            else:
-                sim_htn_control = st.checkbox(
-                    "Kontrola ciśnienia tętniczego (RR < 130/80 mmHg)",
-                    value=True,
-                    disabled=True,
-                    key="sim_htn",
-                    help="Pacjent ma już prawidłowe ciśnienie tętnicze w wywiadzie.",
-                )
-
-        sim_patient = patient.copy()
-        sim_patient["avg_glucose_level"] = float(sim_glucose)
-        sim_patient["bmi"] = float(sim_bmi)
-        if sim_smoking == "never smoked":
-            sim_patient["smoking_status"] = "never smoked"
-        if hypertension:
-            sim_patient["hypertension"] = 0 if sim_htn_control else 1
-        else:
-            sim_patient["hypertension"] = 0
-
-        if pipeline_artifact is not None:
-            sim_risk_out = predict_stroke_risk(pipeline_artifact, sim_patient)
-            sim_prob = float(sim_risk_out["probability"] if isinstance(sim_risk_out, dict) else sim_risk_out[0])
-        else:
-            sim_prob, _ = predict_patient_risk(sim_patient)
-
-        # Guarantee non-negative ARR for clinically improved profiles
-        is_clinically_improved = (
-            sim_patient["avg_glucose_level"] <= patient["avg_glucose_level"] + 1e-4
-            and sim_patient["bmi"] <= patient["bmi"] + 1e-4
-            and sim_patient["hypertension"] <= patient["hypertension"]
-            and (
-                sim_patient["smoking_status"] == patient["smoking_status"]
-                or sim_patient["smoking_status"] == "never smoked"
-                or (patient["smoking_status"] == "smokes" and sim_patient["smoking_status"] == "formerly smoked")
-            )
-        )
-        if is_clinically_improved:
-            sim_prob = min(sim_prob, prob)
-
-        arr = (prob - sim_prob) * 100.0
-        if is_clinically_improved:
-            arr = max(0.0, arr)
-        rrr = ((prob - sim_prob) / prob) * 100.0 if prob > 0 else 0.0
-        if is_clinically_improved:
-            rrr = max(0.0, rrr)
-
-        sim_c1, sim_c2, sim_c3 = st.columns(3)
-        with sim_c1:
-            st.metric("Skorygowane Ryzyko", f"{sim_prob * 100:.1f}%", delta=f"{-arr:.1f}%", delta_color="inverse")
-        with sim_c2:
-            st.metric("Bezwzględna Redukcja Ryzyka (ARR)", f"{max(0.0, arr):.1f}%")
-        with sim_c3:
-            st.metric("Względna Redukcja Ryzyka (RRR)", f"{max(0.0, rrr):.1f}%")
-
-        if arr > 0.5:
-            st.success(
-                f"🌟 **Korzyść kliniczna:** Osiągnięcie założonych celów może obniżyć 5-letnie ryzyko udaru o "
-                f"**{arr:.1f}% punktów procentowych** (z {prob * 100:.1f}% do {sim_prob * 100:.1f}%, "
-                f"co odpowiada **{rrr:.0f}% względnej redukcji ryzyka**)."
-            )
-        else:
-            st.info("Biomarkery są już w optymalnym zakresie docelowym.")
-
-        # Interactive 15-year Age Risk Trajectory Curve
-        st.markdown("<hr style='margin: 18px 0 14px 0; border: none; border-top: 1px solid #bae6fd;'>", unsafe_allow_html=True)
-        st.markdown(
-            """
-            <div style="font-weight: 700; font-size: 1.05rem; color: #0f172a; margin-bottom: 2px;">
-                📈 15-Letnia Trajektoria Wieku i Ryzyka (Status Quo vs. Aktywna Interwencja)
-            </div>
-            <div style="font-size: 0.82rem; color: #475569; margin-bottom: 12px;">
-                Prognoza narastania ryzyka w czasie z uwzględnieniem luki protekcyjnej wynikającej z kontroli biomarkerów.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        trajectory_df = calculate_age_risk_trajectory(
-            patient_current=patient,
-            patient_target=sim_patient,
-            pipeline_artifact=pipeline_artifact,
-            years_ahead=15,
-            max_age=85.0,
-        )
-        fig_trajectory = plot_age_risk_trajectory(
-            trajectory_df=trajectory_df,
-            optimal_threshold=optimal_th,
-            title="15-Letnia Trajektoria Ryzyka Udaru Mózgu",
-        )
-        st.plotly_chart(fig_trajectory, use_container_width=True)
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- COLLAPSIBLE FORMATTED EHR NOTE ---
-        with st.expander("📋 Exportable Clinical Consultation Note (EHR Ready)", expanded=False):
-            top_driver = contributions.iloc[0]
-            pop_benchmarks = calculate_patient_percentiles(prob, patient["age"])
-            last_traj = trajectory_df.iloc[-1]
-            ehr_body = (
-                f"STROKE RISK STRATIFICATION & CLINICAL DECISION SUPPORT NOTE\n"
-                f"---------------------------------------------------\n"
-                f"Demographics: Age {patient['age']:.0f} | Sex: {patient['gender']} | Residence: {patient['Residence_type']}\n"
-                f"Hypertension: {'Yes' if patient['hypertension'] else 'No'} | "
-                f"Heart Disease: {'Yes' if patient['heart_disease'] else 'No'} | "
-                f"Smoking: {patient['smoking_status']}\n"
-                f"Glucose: {patient['avg_glucose_level']:.1f} mg/dL | BMI: {patient['bmi']:.1f} kg/m²\n\n"
-                f"ASSESSMENT & MODEL FINDINGS:\n"
-                f"- Predicted 5-Year Stroke Risk: {prob * 100:.1f}%\n"
-                f"- Clinical Risk Category: {tier['tier'].upper()} ({tier['cutoff_range']})\n"
-                f"- Screening Status: {'ABOVE OPTIMAL THRESHOLD (Positive)' if prob >= optimal_th else 'Below screening cutoff (Negative)'} (p* = {optimal_th * 100:.1f}%)\n"
-                f"- Vascular Age: {vasc_age:.1f} lat (Delta: {delta_age:+.1f} lat)\n"
-                f"- Framing / Guidance: {vasc_res['framing_message']}\n"
-                f"- Relative Risk vs Baseline: {relative_risk:.1f}x\n"
-                f"- Population Percentile Benchmarks: {pop_benchmarks['decade_percentile']:.1f}% ({pop_benchmarks['decade_label']}) | {pop_benchmarks['overall_percentile']:.1f}% (Adult Cohort Overall)\n"
-                f"- Primary Risk Contributor: {top_driver['feature']} ({top_driver['value']}) with SHAP impact +{top_driver['shap_value']:.2f}\n\n"
-                f"INTERVENTION GOALS & PROJECTED RISK REDUCTION:\n"
-                f"- Target Glucose: {sim_glucose:.0f} mg/dL | Target BMI: {sim_bmi:.1f} | Smoking: {sim_smoking} | BP Control: {'Targeted (<130/80)' if sim_patient['hypertension'] == 0 else 'Uncontrolled'}\n"
-                f"- Projected Post-Intervention Risk: {sim_prob * 100:.1f}%\n"
-                f"- Absolute Risk Reduction (ARR): {arr:.1f}% | Relative Risk Reduction (RRR): {rrr:.1f}%\n"
-                f"- 15-Year Trajectory Deferred Risk Gap: {last_traj['arr_pct']:.1f}% ARR at age {last_traj['age']:.0f} (RRR: {last_traj['rrr_pct']:.0f}%)\n"
-                f"- Clinical Recommendation: {tier['recommendation']}\n"
-            )
-            st.markdown('<div class="ehr-note-area">', unsafe_allow_html=True)
-            st.text_area("Copy into Clinical Health Record:", ehr_body, height=220)
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- 1-CLICK PRINTABLE CONSULTATION HANDOUT (A4 POLISH SHEET) ---
-        render_printable_consultation(
-            patient=patient,
-            prob=prob,
-            optimal_th=optimal_th,
-            tier=tier,
-            vasc_age=vasc_age,
-            delta_age=delta_age,
-            rejuv_potential=rejuv_potential,
-            sim_patient=sim_patient,
-            sim_prob=sim_prob,
-            arr=arr,
-            rrr=rrr,
-        )
-
-    with tab_xai:
-        # --- TAB 2: EXPLAINABLE AI (XAI) CLINICAL DASHBOARD ---
-        st.markdown(
-            """
-            <div class="clinic-card">
-                <div style="font-weight: 800; font-size: 1.25rem; color: #0f172a; margin-bottom: 4px;">
-                    🔬 Wyjaśnialna Sztuczna Inteligencja w Diagnostyce Udaru (XAI)
-                </div>
-                <div style="font-size: 0.88rem; color: #475569; line-height: 1.5;">
-                    Transparentna interpretacja modeli uczenia maszynowego w medycynie.
-                    Łączymy <b>globalną hierarchię biomarkerów</b> populacji z <b>lokalną atrybucją SHAP (Shapley Additive exPlanations)</b>
-                    dla zindywidualizowanych studiów przypadków klinicznych.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # 1. Global Feature Importance Section
-        st.markdown(
-            """
-            <div class="clinic-card">
-                <div style="font-weight: 700; font-size: 1.1rem; color: #0f172a; margin-bottom: 2px;">
-                    📊 Globalna Ważność Cech Klinicznych (Global Feature Importance)
-                </div>
-                <div style="font-size: 0.83rem; color: #475569; margin-bottom: 12px;">
-                    Hierarchia predyktorów w wytrenowanym modelu populacyjnym na kohorcie dorosłych pacjentów.
-                </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        df_importances = get_cached_global_importance()
-        top_n_choice = st.slider(
-            "Liczba prezentowanych cech kluczowych (Top N):",
-            min_value=5,
-            max_value=len(df_importances),
-            value=min(10, len(df_importances)),
-            step=1,
-            key="xai_top_n",
-        )
-
-        fig_global = plot_global_feature_importance_plotly(
-            df_importances,
-            top_n=top_n_choice,
-            title="Globalna Ważność Cech Klinicznych",
-        )
-        st.plotly_chart(fig_global, use_container_width=True)
-
-        st.markdown(
-            """
-            <div style="font-size: 0.84rem; color: #334155; background: #ffffff; padding: 12px; border-radius: 12px; border: 1px solid #bae6fd; margin-top: 8px;">
-                💡 <b>Kluczowy Wniosek Epidemiologiczny:</b> Wiek pacjenta, średni poziom glukozy we krwi oraz wskaźnik masy ciała (BMI)
-                odpowiadają za ponad <b>85%</b> całkowitej mocy predykcyjnej modelu. Nadciśnienie tętnicze i status palenia tytoniu
-                stanowią bezpośrednie modyfikowalne czynniki kardiometaboliczne.
-            </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # 2. Local Clinical Archetypes SHAP Waterfall Section
-        st.markdown(
-            """
-            <div class="clinic-card">
-                <div style="font-weight: 700; font-size: 1.1rem; color: #0f172a; margin-bottom: 2px;">
-                    🩺 Kliniczne Studia Przypadków: Wykresy Kaskadowe SHAP (Waterfall Case Studies)
-                </div>
-                <div style="font-size: 0.83rem; color: #475569; margin-bottom: 12px;">
-                    Wizualizacja przesunięć ryzyka dla 3 reprezentatywnych archetypów z kohorty testowej:
-                    czerwone słupki (+) podwyższają prawdopodobieństwo udaru, niebieskie (-) pełnią funkcję protekcyjną.
-                </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        archetypes = get_cached_archetype_case_studies()
-        archetype_keys = list(archetypes.keys())
-        selected_archetype_key = st.radio(
-            "Wybierz profil kliniczny do analizy SHAP:",
-            archetype_keys,
-            format_func=lambda k: f"{'🔴' if k == 'True Positive' else '🟢' if k == 'True Negative' else '🟡'} {k}: {archetypes[k]['title_pl']}",
-            horizontal=True,
-            key="xai_arch_selector",
-        )
-
-        arch_data = archetypes[selected_archetype_key]
-        arch_patient = arch_data["patient"]
-
-        # Archetype Summary Metrics
-        m1, m2, m3, m4 = st.columns(4)
-        with m1:
-            st.metric("Predykowane Ryzyko", f"{arch_data['predicted_risk'] * 100:.1f}%")
-        with m2:
-            outcome_text = "Udar (1)" if arch_data["true_label"] == 1 else "Brak udaru (0)"
-            st.metric("Rzeczywisty Wynik", outcome_text)
-        with m3:
-            st.metric("Wiek Pacjenta", f"{arch_patient.get('age', 0):.0f} lat")
-        with m4:
-            htn_text = "Tak" if arch_patient.get("hypertension", 0) == 1 else "Nie"
-            st.metric("Nadciśnienie Tętnicze", htn_text)
-
-        # Waterfall Plot for Archetype
-        fig_arch_waterfall = plot_shap_waterfall_plotly(
-            explanation_or_shap_values={
-                "features": arch_data["feature_names"],
-                "shap_values": arch_data["shap_values"],
-                "base_value": arch_data["base_value"],
-                "data": arch_data["data"],
-            },
-            patient_row=arch_patient,
-            archetype_name=f"{selected_archetype_key} — {arch_data['title_pl']}",
-            max_display=8,
-        )
-        st.plotly_chart(fig_arch_waterfall, use_container_width=True)
-
-        st.info(f"📋 **Ocena Kliniczna Archetypu:** {arch_data['description_pl']}")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # 3. Live Interactive Patient SHAP Explanation Section
-        st.markdown(
-            """
-            <div class="clinic-card">
-                <div style="font-weight: 700; font-size: 1.1rem; color: #0f172a; margin-bottom: 2px;">
-                    🎯 Zindywidualizowany Wykres SHAP Waterfall dla Aktywnego Pacjenta
-                </div>
-                <div style="font-size: 0.83rem; color: #475569; margin-bottom: 12px;">
-                    Interaktywna dekompozycja wkładu każdego biomarkerka dla parametrów pacjenta ustawionych w panelu bocznym.
-                </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        fig_patient_waterfall = plot_shap_waterfall_plotly(
-            explanation_or_shap_values=contributions,
-            patient_row=patient,
-            archetype_name=f"Aktywny Pacjent ({selected_preset})",
-            max_display=8,
-        )
-        st.plotly_chart(fig_patient_waterfall, use_container_width=True)
-
-        with st.expander("📥 Zobacz i pobierz wersję publikacyjną (Matplotlib High-DPI)", expanded=False):
-            fig_mat = plot_shap_waterfall(
-                explanation_or_shap_values=contributions,
-                patient_row=patient,
-                archetype_name=f"Pacjent: {selected_preset}",
-                max_display=8,
-                as_plotly=False,
-            )
-            st.pyplot(fig_mat, use_container_width=True)
-
-        st.markdown("</div>", unsafe_allow_html=True)
+        render_patient_view(adult, model_result)
 
 
 if __name__ == "__main__":
