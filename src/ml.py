@@ -8,7 +8,13 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -121,7 +127,7 @@ def run_ml_benchmark(
     rows = []
     for name, classifier in get_model_catalog(random_state).items():
         pipeline = Pipeline([
-            ("preprocessor", build_preprocessor(scale_numeric=name == "Logistic Regression")),
+            ("preprocessor", build_preprocessor(scale_numeric=True)),
             ("classifier", classifier),
         ])
         pipeline.fit(X_train, y_train)
@@ -133,6 +139,8 @@ def run_ml_benchmark(
             "model": name,
             "threshold": threshold,
             **metrics,
+            "roc_auc": float(roc_auc_score(y_test, probabilities)),
+            "average_precision": float(average_precision_score(y_test, probabilities)),
         })
 
     results = pd.DataFrame(rows).sort_values("f1", ascending=False).reset_index(drop=True)
@@ -149,7 +157,13 @@ def run_ml_benchmark(
         "calibrated_optimal_threshold": float(best_row["threshold"]),
         "feature_names": features,
         "metrics": best_row,
-        "train_test_split": {"n_train": len(X_train), "n_test": len(X_test)},
+        "train_test_split": {
+            "n_train": len(X_train),
+            "n_test": len(X_test),
+            "test_size": test_size,
+            "random_state": random_state,
+            "stratified": True,
+        },
     }
 
 
