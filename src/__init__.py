@@ -2,6 +2,8 @@
 
 from src.data import (
     load_data,
+    validate_dataset,
+    DatasetValidationError,
     curate_stroke_data,
     get_curated_cohorts,
     validate_missing_bmi_patterns,
@@ -64,6 +66,8 @@ from src.app.print_sheet import (
 
 __all__ = [
     "load_data",
+    "validate_dataset",
+    "DatasetValidationError",
     "curate_stroke_data",
     "get_curated_cohorts",
     "validate_missing_bmi_patterns",

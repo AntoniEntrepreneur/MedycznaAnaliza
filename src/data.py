@@ -1,116 +1,77 @@
-"""Automated data acquisition pipeline for stroke prediction dataset."""
+"""Load and validate the tracked stroke prediction dataset."""
 
-import io
-import ssl
 from pathlib import Path
 from typing import NamedTuple, Optional, Union
-import urllib.request
 import pandas as pd
 
 from src.config import (
     LOCAL_RAW_DATA_PATH,
-    PRIMARY_REMOTE_URL,
-    MIRROR_REMOTE_URL,
     RAW_DATA_FILENAME,
+    TARGET_COL,
+    ID_COL,
+    CATEGORICAL_COLS,
+    BINARY_COLS,
+    NUMERIC_CONTINUOUS_COLS,
+)
+
+REQUIRED_COLUMNS = (
+    [ID_COL, TARGET_COL]
+    + NUMERIC_CONTINUOUS_COLS
+    + BINARY_COLS
+    + CATEGORICAL_COLS
 )
 
 
-def _fetch_remote_bytes(url: str) -> bytes:
-    """Fetch bytes from remote URL with SSL fallback."""
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "MedycznaAnaliza/1.0 (academic stroke analysis)"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            return response.read()
-    except urllib.error.URLError:
-        # Fallback for environments with unconfigured SSL root certificates (e.g. macOS dev setups)
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as response:
-            return response.read()
+class DatasetValidationError(ValueError):
+    """Raised when the tracked stroke CSV cannot support the analysis."""
 
 
-def find_local_dataset() -> Optional[Path]:
-    """Search for the dataset CSV in standard project directories."""
-    candidate_paths = [
-        LOCAL_RAW_DATA_PATH,
-        Path("data/raw") / RAW_DATA_FILENAME,
-        Path("../data/raw") / RAW_DATA_FILENAME,
-        Path("../../data/raw") / RAW_DATA_FILENAME,
-        Path(RAW_DATA_FILENAME),
-    ]
-    for path in candidate_paths:
-        if path.exists() and path.is_file():
-            return path.resolve()
-    return None
-
-
-def download_dataset(
-    dest_path: Optional[Union[str, Path]] = None,
-    primary_url: str = PRIMARY_REMOTE_URL,
-    mirror_url: str = MIRROR_REMOTE_URL,
-) -> Path:
-    """Download the raw dataset from remote repository fallback URLs."""
-    target_path = Path(dest_path) if dest_path else LOCAL_RAW_DATA_PATH
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-
-    errors = []
-    for url in [primary_url, mirror_url]:
-        try:
-            data = _fetch_remote_bytes(url)
-            with open(target_path, "wb") as f:
-                f.write(data)
-            return target_path
-        except Exception as exc:
-            errors.append(f"{url} ({exc})")
-
-    raise RuntimeError(
-        f"Failed to download stroke dataset from all sources: {'; '.join(errors)}"
-    )
+def validate_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """Validate the cohort and feature columns used by the modeling pipeline."""
+    missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
+    if missing:
+        raise DatasetValidationError(
+            "Stroke CSV is missing required columns: "
+            + ", ".join(missing)
+            + ". Restore data/raw/healthcare-dataset-stroke-data.csv from the repository."
+        )
+    if df.empty:
+        raise DatasetValidationError("Stroke CSV is empty; provide the tracked cohort CSV.")
+    if df[ID_COL].duplicated().any():
+        raise DatasetValidationError("Stroke CSV contains duplicate patient IDs.")
+    if not set(df[TARGET_COL].dropna().unique()).issubset({0, 1}):
+        raise DatasetValidationError("The stroke target must contain only 0/1 values.")
+    if df[TARGET_COL].isna().any():
+        raise DatasetValidationError("The stroke target contains missing values.")
+    if not (df["age"].dropna() >= 0).all():
+        raise DatasetValidationError("Age must be non-negative.")
+    if int((df["age"] >= 18).sum()) == 0 or int((df["age"] < 18).sum()) == 0:
+        raise DatasetValidationError("CSV must contain both adult and paediatric cohorts.")
+    return df
 
 
 def load_data(
     path_or_url: Optional[Union[str, Path]] = None,
-    auto_download: bool = True,
-    cache: bool = True,
+    auto_download: bool = False,
+    cache: bool = False,
 ) -> pd.DataFrame:
-    """Load stroke dataset from local path, custom URL, or automated fallback."""
-    # Explicit URL supplied
-    if isinstance(path_or_url, str) and (
-        path_or_url.startswith("http://") or path_or_url.startswith("https://")
-    ):
-        raw_bytes = _fetch_remote_bytes(path_or_url)
-        return pd.read_csv(io.BytesIO(raw_bytes), na_values=["N/A", "NA", ""])
-
-    # Explicit local path supplied
-    if path_or_url is not None:
-        target_file = Path(path_or_url)
-        if not target_file.exists():
-            raise FileNotFoundError(f"Specified dataset file not found: {path_or_url}")
-        return pd.read_csv(target_file, na_values=["N/A", "NA", ""])
-
-    # Automatic discovery
-    local_path = find_local_dataset()
-    if local_path is not None:
-        return pd.read_csv(local_path, na_values=["N/A", "NA", ""])
-
-    # Remote fallback
-    if auto_download:
-        save_target = LOCAL_RAW_DATA_PATH if cache else None
-        try:
-            downloaded_path = download_dataset(dest_path=save_target)
-            return pd.read_csv(downloaded_path, na_values=["N/A", "NA", ""])
-        except Exception:
-            # Direct in-memory load if local write fails
-            raw_bytes = _fetch_remote_bytes(PRIMARY_REMOTE_URL)
-            return pd.read_csv(io.BytesIO(raw_bytes), na_values=["N/A", "NA", ""])
-
-    raise FileNotFoundError(
-        "Stroke dataset not found locally and auto_download is disabled."
-    )
+    """Load only the tracked CSV; never download or silently return an empty frame."""
+    if isinstance(path_or_url, str) and "://" in path_or_url:
+        raise ValueError(
+            "Remote dataset URLs are not supported. Use the tracked CSV at "
+            "data/raw/healthcare-dataset-stroke-data.csv."
+        )
+    target_file = Path(path_or_url) if path_or_url is not None else LOCAL_RAW_DATA_PATH
+    if not target_file.is_file():
+        raise FileNotFoundError(
+            f"Required stroke CSV not found at {target_file}. "
+            "Check out data/raw/healthcare-dataset-stroke-data.csv from the repository."
+        )
+    try:
+        frame = pd.read_csv(target_file, na_values=["N/A", "NA", ""])
+    except (OSError, pd.errors.ParserError) as exc:
+        raise RuntimeError(f"Unable to read required stroke CSV at {target_file}: {exc}") from exc
+    return validate_dataset(frame)
 
 
 class CuratedCohorts(NamedTuple):
