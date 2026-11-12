@@ -23,30 +23,21 @@ MedycznaAnaliza/
 └── README.md
 ```
 
-## Automatyczne pobieranie danych (Data Acquisition)
+## Źródło danych (Data Acquisition)
 
-Repozytorium zawiera wbudowany mechanizm automatycznego ładowania danych (`src/data.py`).
-Dane są automatycznie wyszukiwane lokalnie w folderze `data/raw/`. W przypadku uruchomienia w odizolowanym środowisku (np. Google Colab) bez pobranego repozytorium, pipeline automatycznie pobiera zbiór z publicznego raw URL na GitHubie i ładuje go do pamięci podręcznej.
+Pipeline używa wyłącznie śledzonego pliku
+`data/raw/healthcare-dataset-stroke-data.csv`. Brak pliku, uszkodzony CSV lub
+niezgodne kolumny kończą działanie konkretnym komunikatem naprawczym; nie ma
+zdalnego fallbacku ani cichego pustego wyniku.
 
 ### Użycie w kodzie Python:
 
 ```python
 from src.data import load_data
 
-# Automatyczne wykrycie pliku lokalnego lub pobranie z raw GitHub
+# Wczytanie i walidacja śledzonego pliku
 df = load_data()
 print(df.shape)  # (5110, 12)
-```
-
-### Jednolinijkowe pobieranie w Google Colab:
-
-Jeśli notebook jest uruchamiany w środowisku Colab bez klonowania całego repozytorium:
-
-```python
-import pandas as pd
-
-url = "https://raw.githubusercontent.com/AntoniEntrepreneur/MedycznaAnaliza/main/data/raw/healthcare-dataset-stroke-data.csv"
-df = pd.read_csv(url, na_values=["N/A", "NA", ""])
 ```
 
 ## Instalacja środowiska lokalnego

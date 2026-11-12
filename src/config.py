@@ -11,16 +11,6 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 RAW_DATA_FILENAME = "healthcare-dataset-stroke-data.csv"
 LOCAL_RAW_DATA_PATH = RAW_DATA_DIR / RAW_DATA_FILENAME
 
-# Remote fallback URLs for Google Colab and remote environments
-PRIMARY_REMOTE_URL = (
-    "https://raw.githubusercontent.com/AntoniEntrepreneur/MedycznaAnaliza/main/"
-    "data/raw/healthcare-dataset-stroke-data.csv"
-)
-MIRROR_REMOTE_URL = (
-    "https://raw.githubusercontent.com/ray-project/raydp/master/tutorials/dataset/"
-    "healthcare-dataset-stroke-data.csv"
-)
-
 # Column and feature definitions
 TARGET_COL = "stroke"
 ID_COL = "id"
