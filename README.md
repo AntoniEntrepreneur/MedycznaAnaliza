@@ -54,11 +54,18 @@ df = pd.read_csv(url, na_values=["N/A", "NA", ""])
 Wymagany Python 3.10+.
 
 ```bash
-# Utworzenie i aktywacja wirtualnego środowiska
-python3 -m venv venv
-source venv/bin/activate  # macOS / Linux
-# lub: .\venv\Scripts\activate na Windows
+# Utworzenie środowiska i instalacja zależności (macOS / Linux)
+./scripts/setup_venv.sh
+source .venv/bin/activate
 
-# Instalacja zależności
-pip install -r requirements.txt
+# Uruchomienie aplikacji
+streamlit run app.py
 ```
+
+Skrypt tworzy środowisko `.venv` (pomijane przez Git) i instaluje zależności
+z `requirements.txt`. Można wskazać inny interpreter, ustawiając
+`PYTHON_BIN`, na przykład `PYTHON_BIN=python3.12 ./scripts/setup_venv.sh`.
+
+Na Windows należy utworzyć środowisko poleceniem `py -m venv .venv`,
+aktywować je przez `.\.venv\Scripts\activate`, a następnie wykonać
+`python -m pip install -r requirements.txt`.
