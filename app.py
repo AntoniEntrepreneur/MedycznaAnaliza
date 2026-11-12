@@ -1,31 +1,40 @@
-"""Small Streamlit application for the shared stroke-analysis dataset."""
+"""Two-view Streamlit application for stroke population analysis and risk."""
 
 from typing import Any, Dict
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.config import LOCAL_RAW_DATA_PATH
+from src.config import CATEGORICAL_COLS, LOCAL_RAW_DATA_PATH, NUMERIC_CONTINUOUS_COLS
 from src.data import DatasetValidationError, curate_stroke_data, load_data
 from src.ml import load_production_pipeline, predict_stroke_risk
+
+
+CATEGORICAL_OPTIONS = {
+    "gender": ["Female", "Male", "Other"],
+    "ever_married": ["No", "Yes"],
+    "work_type": ["Private", "Self-employed", "Govt_job", "children", "Never_worked"],
+    "Residence_type": ["Urban", "Rural"],
+    "smoking_status": ["never smoked", "formerly smoked", "smokes", "Unknown"],
+}
 
 
 @st.cache_data
 def load_population() -> pd.DataFrame:
     """Load the validated adult cohort used by the notebook and application."""
-    raw = load_data()
-    return curate_stroke_data(raw).adult
+    return curate_stroke_data(load_data()).adult
 
 
-@st.cache_resource
-def train_pipeline(adult: pd.DataFrame) -> Dict[str, Any]:
-    """Train the runtime model from the same curated cohort."""
-    return load_production_pipeline(df_adult=adult)
+@st.cache_resource(show_spinner="Trenowanie modelu na śledzonym zbiorze danych…")
+def get_model_result() -> Dict[str, Any]:
+    """Train and cache the in-memory shared Logistic Regression pipeline."""
+    return load_production_pipeline()
 
 
 def render_dataset_error(error: Exception) -> None:
-    """Show an actionable dataset error instead of rendering an empty dashboard."""
+    """Show an actionable dataset error instead of an empty dashboard."""
     st.error(f"Nie można uruchomić analizy: {error}")
     st.info(
         "Napraw dane i uruchom aplikację ponownie. Wymagany jest prawidłowy plik "
@@ -34,26 +43,34 @@ def render_dataset_error(error: Exception) -> None:
 
 
 def validate_patient(patient: Dict[str, Any], feature_names: list[str]) -> list[str]:
-    """Return actionable validation messages for the submitted patient profile."""
+    """Return actionable validation messages for one patient profile."""
     errors = [
         f"Brak wartości dla cechy „{feature}”."
         for feature in feature_names
-        if feature not in patient or pd.isna(patient[feature])
+        if feature not in patient or patient[feature] in (None, "")
     ]
     for feature in NUMERIC_CONTINUOUS_COLS:
         value = patient.get(feature)
         try:
-            valid_number = value is not None and pd.notna(value) and float(value) == float(value)
+            valid_number = value is not None and np.isfinite(float(value))
         except (TypeError, ValueError):
             valid_number = False
         if not valid_number:
             errors.append(f"Cecha „{feature}” musi być skończoną liczbą.")
-    if float(patient.get("age", 0)) < 18:
-        errors.append("Wiek musi wynosić co najmniej 18 lat, ponieważ model korzysta z kohorty dorosłych.")
-    if float(patient.get("avg_glucose_level", 0)) <= 0:
-        errors.append("Średni poziom glukozy musi być większy od 0.")
-    if float(patient.get("bmi", 0)) <= 0:
-        errors.append("BMI musi być większe od 0.")
+    try:
+        if float(patient.get("age", 0)) < 18:
+            errors.append(
+                "Wiek musi wynosić co najmniej 18 lat, ponieważ model korzysta z kohorty dorosłych."
+            )
+        if float(patient.get("avg_glucose_level", 0)) <= 0:
+            errors.append("Średni poziom glukozy musi być większy od 0.")
+        if float(patient.get("bmi", 0)) <= 0:
+            errors.append("BMI musi być większe od 0.")
+    except (TypeError, ValueError):
+        pass
+    for feature in CATEGORICAL_COLS:
+        if patient.get(feature) not in CATEGORICAL_OPTIONS[feature]:
+            errors.append(f"Nieprawidłowa wartość cechy „{feature}”.")
     return errors
 
 
@@ -146,7 +163,9 @@ def render_population_view(adult: pd.DataFrame) -> None:
         ],
         ignore_index=True,
     )
-    risk_factors["poziom"] = risk_factors["label"].map({"0": "Nie", "1": "Tak"}).fillna(risk_factors["label"])
+    risk_factors["poziom"] = risk_factors["label"].map({"0": "Nie", "1": "Tak"}).fillna(
+        risk_factors["label"]
+    )
     factor_plot = px.bar(
         risk_factors,
         x="czynnik",
@@ -160,77 +179,90 @@ def render_population_view(adult: pd.DataFrame) -> None:
     st.plotly_chart(factor_plot, use_container_width=True)
 
 
-def render_patient_view(adult: pd.DataFrame, result: Dict[str, Any]) -> None:
-    """Render the second, deliberately small patient risk view."""
+def render_calculator() -> None:
+    """Render the patient calculator and its threshold-based result."""
     st.header("Kalkulator ryzyka pacjenta")
     st.caption(
         "To akademicki szacunek statystyczny, a nie diagnoza medyczna ani rekomendacja leczenia."
     )
 
-    with st.form("patient_form"):
+    try:
+        model_result = get_model_result()
+    except Exception as exc:
+        st.error(
+            "Nie można przygotować modelu. Sprawdź, czy plik "
+            f"`{LOCAL_RAW_DATA_PATH}` istnieje i zawiera wymagane kolumny. Szczegóły: {exc}"
+        )
+        return
+
+    with st.form("patient-risk-form"):
         left, right = st.columns(2)
         with left:
-            age = st.number_input("Wiek", min_value=18.0, max_value=110.0, value=60.0)
-            glucose = st.number_input("Średni poziom glukozy", min_value=0.0, value=100.0)
-            bmi = st.number_input("BMI", min_value=0.0, value=28.0)
-            gender = st.selectbox("Płeć", sorted(adult["gender"].dropna().unique()))
-            smoking = st.selectbox("Status palenia", sorted(adult["smoking_status"].dropna().unique()))
+            age = st.number_input("Wiek (lata)", min_value=18.0, max_value=120.0, value=50.0)
+            glucose = st.number_input(
+                "Średni poziom glukozy (mg/dL)", min_value=0.1, value=100.0
+            )
+            bmi = st.number_input("BMI (kg/m²)", min_value=0.1, value=25.0)
+            gender = st.selectbox("Płeć", CATEGORICAL_OPTIONS["gender"])
+            smoking = st.selectbox("Status palenia", CATEGORICAL_OPTIONS["smoking_status"])
         with right:
-            hypertension = st.checkbox("Nadciśnienie")
+            hypertension = st.checkbox("Nadciśnienie tętnicze")
             heart_disease = st.checkbox("Choroba serca")
-            married = st.selectbox("W związku małżeńskim", sorted(adult["ever_married"].dropna().unique()))
-            work_type = st.selectbox("Charakter pracy", sorted(adult["work_type"].dropna().unique()))
-            residence = st.selectbox("Miejsce zamieszkania", sorted(adult["Residence_type"].dropna().unique()))
-        submitted = st.form_submit_button("Oceń profil")
+            married = st.selectbox("Stan cywilny", CATEGORICAL_OPTIONS["ever_married"])
+            work_type = st.selectbox("Rodzaj pracy", CATEGORICAL_OPTIONS["work_type"])
+            residence = st.selectbox("Miejsce zamieszkania", CATEGORICAL_OPTIONS["Residence_type"])
+        submitted = st.form_submit_button("Oceń ryzyko")
 
-    if submitted:
-        patient = {
-            "age": age,
-            "avg_glucose_level": glucose,
-            "bmi": bmi,
-            "gender": gender,
-            "smoking_status": smoking,
-            "hypertension": int(hypertension),
-            "heart_disease": int(heart_disease),
-            "ever_married": married,
-            "work_type": work_type,
-            "Residence_type": residence,
-        }
-        errors = validate_patient(patient, result["feature_names"])
-        if errors:
-            st.error("Nie można ocenić profilu:")
-            for error in errors:
-                st.write(f"- {error}")
-            return
-        try:
-            prediction = predict_stroke_risk(result, patient)
-        except (TypeError, ValueError, KeyError) as error:
-            st.error(f"Nie można obliczyć wyniku. Sprawdź dane wejściowe: {error}")
-            return
-        st.metric("Szacowane prawdopodobieństwo udaru", f"{prediction['probability_percent']:.1f}%")
-        st.write(
-            f"Reguła: prawdopodobieństwo **≥ próg** oznacza klasyfikację dodatnią. "
-            f"Próg maksimum F1: **{prediction['decision_threshold']:.3f}**. "
-            f"Klasyfikacja: **{'powyżej' if prediction['screening_positive'] else 'poniżej'} progu**."
-        )
+    if not submitted:
+        st.write("Wprowadź profil pacjenta i wybierz **Oceń ryzyko**.")
+        return
+
+    patient = {
+        "age": float(age),
+        "avg_glucose_level": float(glucose),
+        "bmi": float(bmi),
+        "gender": gender,
+        "smoking_status": smoking,
+        "hypertension": int(hypertension),
+        "heart_disease": int(heart_disease),
+        "ever_married": married,
+        "work_type": work_type,
+        "Residence_type": residence,
+    }
+    errors = validate_patient(patient, model_result["feature_names"])
+    if errors:
+        st.error("Nie można ocenić profilu:")
+        for error in errors:
+            st.write(f"- {error}")
+        return
+
+    try:
+        prediction = predict_stroke_risk(model_result, patient)
+    except Exception as exc:
+        st.error(f"Nie można obliczyć wyniku. Sprawdź dane wejściowe. Szczegóły: {exc}")
+        return
+
+    st.metric("Szacowane prawdopodobieństwo udaru", f"{prediction['probability_percent']:.1f}%")
+    st.write(
+        f"Reguła: prawdopodobieństwo **≥ próg** oznacza klasyfikację dodatnią. "
+        f"Próg maksimum F1: **{prediction['decision_threshold']:.3f}**. "
+        f"Klasyfikacja: **{'powyżej' if prediction['screening_positive'] else 'poniżej'} progu**."
+    )
+    st.caption(f"Poziom ryzyka w danych modelu: **{prediction['risk_tier']}**.")
 
 
 def main() -> None:
     """Start the two-view population and patient application."""
-    st.set_page_config(page_title="Analiza populacji udaru", page_icon="🧪", layout="wide")
+    st.set_page_config(page_title="Analiza populacji udaru", page_icon="🩺", layout="wide")
     st.title("Analiza danych o udarze")
-    try:
-        adult = load_population()
-        model_result = train_pipeline(adult)
-    except (DatasetValidationError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:
-        render_dataset_error(error)
-        st.stop()
-
-    view = st.sidebar.radio("Widok", ["Populacja", "Pacjent"])
+    view = st.sidebar.radio("Widok", ["Populacja", "Kalkulator pacjenta"])
     if view == "Populacja":
-        render_population_view(adult)
+        try:
+            render_population_view(load_population())
+        except (DatasetValidationError, FileNotFoundError, OSError, RuntimeError, ValueError) as error:
+            render_dataset_error(error)
     else:
-        render_patient_view(adult, model_result)
+        render_calculator()
 
 
 if __name__ == "__main__":

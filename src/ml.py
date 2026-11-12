@@ -153,6 +153,40 @@ def run_ml_benchmark(
     }
 
 
+def run_logistic_regression_pipeline(
+    df_adult: Optional[pd.DataFrame] = None,
+    test_size: float = 0.20,
+    random_state: int = 42,
+) -> Dict[str, Any]:
+    """Train the shared Logistic Regression pipeline and select its F1 threshold."""
+    df = df_adult.copy() if df_adult is not None else get_curated_cohorts().adult.copy()
+    df = df[df["age"] >= 18].reset_index(drop=True)
+    features = [column for column in DEFAULT_FEATURE_COLS if column in df]
+    X, y = df[features], df[TARGET_COL].astype(int).to_numpy()
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, stratify=y, random_state=random_state
+    )
+    pipeline = Pipeline([
+        ("preprocessor", build_preprocessor(scale_numeric=True)),
+        ("classifier", get_model_catalog(random_state)["Logistic Regression"]),
+    ])
+    pipeline.fit(X_train, y_train)
+    probabilities = pipeline.predict_proba(X_test)[:, 1]
+    threshold, f1 = optimize_threshold(y_test, probabilities)
+    metrics = compute_classification_metrics(y_test, probabilities, threshold)
+    metrics["threshold"] = threshold
+    metrics["threshold_f1"] = f1
+    return {
+        "pipeline": pipeline,
+        "production_pipeline": pipeline,
+        "optimal_threshold": threshold,
+        "calibrated_optimal_threshold": threshold,
+        "feature_names": features,
+        "metrics": metrics,
+        "train_test_split": {"n_train": len(X_train), "n_test": len(X_test)},
+    }
+
+
 def predict_stroke_risk(
     pipeline_or_result: Any,
     patient_data: Union[pd.DataFrame, Dict[str, Any]],
@@ -175,8 +209,8 @@ def predict_stroke_risk(
 
 
 def load_production_pipeline(*_: Any, **__: Any) -> Dict[str, Any]:
-    """Train the in-memory production pipeline; no serialized model is loaded."""
-    return run_ml_benchmark()
+    """Train the in-memory Logistic Regression pipeline; no artifact is loaded."""
+    return run_logistic_regression_pipeline()
 
 
 def save_production_pipeline(*_: Any, **__: Any) -> None:
