@@ -1,62 +1,61 @@
-# Analiza Danych w Medycynie — Predykcja Ryzyka Udaru Mózgu
+# Analiza danych o udarze
 
-Projekt akademicki poświęcony zaawansowanej analizie statystycznej i uczeniu maszynowemu w medycynie na podstawie zbioru danych klinicznych dotyczących udarów mózgu (*Stroke Prediction Dataset*, ~5 110 rekordów).
+Projekt akademicki analizujący *Stroke Prediction Dataset* i budujący prosty
+model przesiewowy dla dorosłej kohorty. Notebook i aplikacja korzystają z tego
+samego kodu ładowania, kuracji i modelowania danych.
 
-## Struktura repozytorium
+## Struktura
 
 ```text
-MedycznaAnaliza/
-├── data/
-│   ├── raw/                       # Surowe dane źródłowe (healthcare-dataset-stroke-data.csv)
-│   └── processed/                 # Przetworzone i zaimputowane dane tabelaryczne
-├── notebooks/                     # Samodzielne notebooki badawcze (Jupyter / Google Colab)
-│   └── 01_stroke_analysis_and_modeling.ipynb
-├── src/                           # Moduły wielokrotnego użytku w Pythonie
-│   ├── __init__.py
-│   ├── config.py                  # Ścieżki, URL-e awaryjne, definicje kolumn klinicznych
-│   ├── data.py                    # Automatyczny pipeline pobierania i ładowania danych
-│   ├── biostatistics.py           # Narzędzia analizy biostatystycznej i testów hipotez
-│   ├── modeling.py                # Pipeline'y ML, obsługa asymetrii klas i progi decyzyjne
-│   └── app.py                     # Interaktywny kalkulator ryzyka klinicznego w Streamlit
-├── docs/                          # Dokumentacja procesu i agentów
-├── requirements.txt               # Zależności biblioteczne
-└── README.md
+data/raw/healthcare-dataset-stroke-data.csv  # wymagany, śledzony zbiór danych
+notebooks/stroke_risk_analysis.ipynb         # liniowy raport analityczny
+src/config.py                                # ścieżki i definicje cech
+src/data.py                                  # walidacja i kohorty
+src/ml.py                                    # preprocesor i modele
+app.py                                       # dwa widoki Streamlit
+scripts/setup_venv.sh                        # konfiguracja środowiska
 ```
 
-## Źródło danych (Data Acquisition)
+## Dane i provenance
 
-Pipeline używa wyłącznie śledzonego pliku
-`data/raw/healthcare-dataset-stroke-data.csv`. Brak pliku, uszkodzony CSV lub
-niezgodne kolumny kończą działanie konkretnym komunikatem naprawczym; nie ma
-zdalnego fallbacku ani cichego pustego wyniku.
+Plik `data/raw/healthcare-dataset-stroke-data.csv` jest lokalną kopią zbioru
+*Stroke Prediction Dataset* autorstwa fedesoriano, opublikowanego w Kaggle:
+<https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset>.
+Repozytorium śledzi kopię, ale nie zmienia ani nie nadaje jej licencji.
+Przed dalszą redystrybucją należy sprawdzić aktualne warunki Kaggle, licencję
+źródła i wymagania atrybucji. Projekt nie pobiera danych automatycznie.
 
-### Użycie w kodzie Python:
+Brak pliku, uszkodzony CSV lub brak wymaganej kolumny kończy działanie
+czytelnym błędem. Nie jest tworzony pusty ani zdalny zastępnik danych.
 
-```python
-from src.data import load_data
+## Uruchomienie
 
-# Wczytanie i walidacja śledzonego pliku
-df = load_data()
-print(df.shape)  # (5110, 12)
-```
-
-## Instalacja środowiska lokalnego
-
-Wymagany Python 3.10+.
+Wymagany jest Python 3.10+.
 
 ```bash
-# Utworzenie środowiska i instalacja zależności (macOS / Linux)
 ./scripts/setup_venv.sh
 source .venv/bin/activate
+```
 
-# Uruchomienie aplikacji
+Notebook można uruchomić z katalogu projektu:
+
+```bash
+jupyter nbconvert --to notebook --execute --inplace \
+  notebooks/stroke_risk_analysis.ipynb
+```
+
+Aplikację uruchamia się poleceniem:
+
+```bash
 streamlit run app.py
 ```
 
-Skrypt tworzy środowisko `.venv` (pomijane przez Git) i instaluje zależności
-z `requirements.txt`. Można wskazać inny interpreter, ustawiając
-`PYTHON_BIN`, na przykład `PYTHON_BIN=python3.12 ./scripts/setup_venv.sh`.
+W aplikacji dostępne są dwa widoki:
 
-Na Windows należy utworzyć środowisko poleceniem `py -m venv .venv`,
-aktywować je przez `.\.venv\Scripts\activate`, a następnie wykonać
-`python -m pip install -r requirements.txt`.
+- **Populacja** — opis dorosłej kohorty, częstość udarów i wykresy cech;
+- **Kalkulator pacjenta** — trening modelu w pamięci i oszacowanie
+  prawdopodobieństwa dla wprowadzonego profilu.
+
+Model nie jest zapisywany ani ładowany z artefaktu. Każde uruchomienie trenuje
+pipeline na śledzonym pliku z ustalonym `random_state=42`. Wynik ma charakter
+akademicki i przesiewowy; nie jest diagnozą ani zaleceniem medycznym.

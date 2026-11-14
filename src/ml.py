@@ -222,11 +222,6 @@ def predict_stroke_risk(
     }
 
 
-def load_production_pipeline(*_: Any, **__: Any) -> Dict[str, Any]:
-    """Train the in-memory Logistic Regression pipeline; no artifact is loaded."""
+def train_production_pipeline(*_: Any, **__: Any) -> Dict[str, Any]:
+    """Train the in-memory Logistic Regression pipeline."""
     return run_logistic_regression_pipeline()
-
-
-def save_production_pipeline(*_: Any, **__: Any) -> None:
-    """Serialization is intentionally unsupported for this shared pipeline."""
-    raise RuntimeError("Serialized model artifacts are not used; train run_ml_benchmark() instead.")
