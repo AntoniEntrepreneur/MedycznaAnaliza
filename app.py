@@ -90,8 +90,8 @@ def render_population_view(adult: pd.DataFrame) -> None:
     """Render a concise overview of the adult study population."""
     st.header("Populacja badania")
     st.caption(
-        "Opisowa analiza dorosłej kohorty po tej samej walidacji i kuracji danych, "
-        "które wykorzystuje notebook."
+        "Opisowa analiza kuracyjnej kohorty dorosłych (wiek >= 18, bez rekordu "
+        "`gender == Other`). Notebook dodatkowo opisuje cały zwalidowany plik."
     )
 
     prevalence = float(adult["stroke"].mean())
@@ -248,7 +248,10 @@ def render_calculator() -> None:
         f"Próg maksimum F1: **{prediction['decision_threshold']:.3f}**. "
         f"Klasyfikacja: **{'powyżej' if prediction['screening_positive'] else 'poniżej'} progu**."
     )
-    st.caption(f"Poziom ryzyka w danych modelu: **{prediction['risk_tier']}**.")
+    st.caption(
+        "Prawdopodobieństwo i klasyfikacja względem progu służą wyłącznie do "
+        "akademickiego przesiewu; nie są kliniczną kategorią ryzyka."
+    )
 
 
 def main() -> None:

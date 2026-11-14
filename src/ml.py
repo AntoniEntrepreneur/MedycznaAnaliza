@@ -15,7 +15,8 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.base import clone
+from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -77,8 +78,13 @@ def optimize_threshold(
     y_probs: np.ndarray,
     thresholds: Optional[np.ndarray] = None,
 ) -> tuple[float, float]:
-    """Select the probability threshold with the maximum F1 score."""
-    candidates = thresholds if thresholds is not None else np.linspace(0.01, 0.99, 99)
+    """Select the threshold with maximum F1 over all probability boundaries."""
+    if thresholds is None:
+        unique_probs = np.unique(np.clip(y_probs.astype(float), 0.0, 1.0))
+        boundaries = (unique_probs[:-1] + unique_probs[1:]) / 2
+        candidates = np.unique(np.concatenate(([0.0, 1.0], unique_probs, boundaries)))
+    else:
+        candidates = np.asarray(thresholds, dtype=float)
     scores = [
         f1_score(y_true, y_probs >= threshold, zero_division=0)
         for threshold in candidates
@@ -99,13 +105,41 @@ def compute_classification_metrics(
     }
 
 
-def classify_risk_tier(prob: float) -> Dict[str, Any]:
-    """Return the dashboard's clinical risk tier for a probability."""
-    if prob < 0.10:
-        return {"tier": "Niskie", "tier_en": "Low", "color": "green"}
-    if prob < 0.25:
-        return {"tier": "Umiarkowane", "tier_en": "Moderate", "color": "amber"}
-    return {"tier": "Wysokie", "tier_en": "High", "color": "red"}
+def _build_pipeline(name: str, random_state: int) -> Pipeline:
+    """Build one configured classifier pipeline."""
+    return Pipeline([
+        ("preprocessor", build_preprocessor(scale_numeric=True)),
+        ("classifier", get_model_catalog(random_state)[name]),
+    ])
+
+
+def _split_adult_data(
+    df_adult: Optional[pd.DataFrame],
+    test_size: float,
+    random_state: int,
+) -> tuple[pd.DataFrame, np.ndarray, pd.DataFrame, np.ndarray, List[str]]:
+    """Prepare the adult cohort and its fixed stratified evaluation split."""
+    df = df_adult.copy() if df_adult is not None else get_curated_cohorts().adult.copy()
+    df = df[df["age"] >= 18].reset_index(drop=True)
+    features = [column for column in DEFAULT_FEATURE_COLS if column in df]
+    X, y = df[features], df[TARGET_COL].astype(int).to_numpy()
+    return (*train_test_split(
+        X, y, test_size=test_size, stratify=y, random_state=random_state
+    ), features)
+
+
+def _select_training_threshold(
+    pipeline: Pipeline,
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    random_state: int,
+) -> tuple[float, float]:
+    """Select F1's threshold from out-of-fold training probabilities."""
+    splitter = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    probabilities = cross_val_predict(
+        clone(pipeline), X_train, y_train, cv=splitter, method="predict_proba"
+    )[:, 1]
+    return optimize_threshold(y_train, probabilities)
 
 
 def run_ml_benchmark(
@@ -115,29 +149,25 @@ def run_ml_benchmark(
     **_: Any,
 ) -> Dict[str, Any]:
     """Compare Logistic Regression and Random Forest on one stratified split."""
-    df = df_adult.copy() if df_adult is not None else get_curated_cohorts().adult.copy()
-    df = df[df["age"] >= 18].reset_index(drop=True)
-    features = [column for column in DEFAULT_FEATURE_COLS if column in df]
-    X, y = df[features], df[TARGET_COL].astype(int).to_numpy()
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, stratify=y, random_state=random_state
+    X_train, X_test, y_train, y_test, features = _split_adult_data(
+        df_adult, test_size, random_state
     )
 
     models: Dict[str, Pipeline] = {}
     rows = []
-    for name, classifier in get_model_catalog(random_state).items():
-        pipeline = Pipeline([
-            ("preprocessor", build_preprocessor(scale_numeric=True)),
-            ("classifier", classifier),
-        ])
+    for name in get_model_catalog(random_state):
+        pipeline = _build_pipeline(name, random_state)
         pipeline.fit(X_train, y_train)
         probabilities = pipeline.predict_proba(X_test)[:, 1]
-        threshold, _ = optimize_threshold(y_test, probabilities)
+        threshold, training_f1 = _select_training_threshold(
+            pipeline, X_train, y_train, random_state
+        )
         metrics = compute_classification_metrics(y_test, probabilities, threshold)
         models[name] = pipeline
         rows.append({
             "model": name,
             "threshold": threshold,
+            "threshold_selection_f1": training_f1,
             **metrics,
             "roc_auc": float(roc_auc_score(y_test, probabilities)),
             "average_precision": float(average_precision_score(y_test, probabilities)),
@@ -173,23 +203,19 @@ def run_logistic_regression_pipeline(
     random_state: int = 42,
 ) -> Dict[str, Any]:
     """Train the shared Logistic Regression pipeline and select its F1 threshold."""
-    df = df_adult.copy() if df_adult is not None else get_curated_cohorts().adult.copy()
-    df = df[df["age"] >= 18].reset_index(drop=True)
-    features = [column for column in DEFAULT_FEATURE_COLS if column in df]
-    X, y = df[features], df[TARGET_COL].astype(int).to_numpy()
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, stratify=y, random_state=random_state
+    X_train, X_test, y_train, y_test, features = _split_adult_data(
+        df_adult, test_size, random_state
     )
-    pipeline = Pipeline([
-        ("preprocessor", build_preprocessor(scale_numeric=True)),
-        ("classifier", get_model_catalog(random_state)["Logistic Regression"]),
-    ])
+    pipeline = _build_pipeline("Logistic Regression", random_state)
+    threshold, training_f1 = _select_training_threshold(
+        pipeline, X_train, y_train, random_state
+    )
     pipeline.fit(X_train, y_train)
     probabilities = pipeline.predict_proba(X_test)[:, 1]
-    threshold, f1 = optimize_threshold(y_test, probabilities)
     metrics = compute_classification_metrics(y_test, probabilities, threshold)
     metrics["threshold"] = threshold
-    metrics["threshold_f1"] = f1
+    metrics["threshold_f1"] = metrics["f1"]
+    metrics["threshold_selection_f1"] = training_f1
     return {
         "pipeline": pipeline,
         "production_pipeline": pipeline,
@@ -217,11 +243,15 @@ def predict_stroke_risk(
         "probability_percent": probability * 100,
         "decision_threshold": float(cutoff),
         "screening_positive": bool(probability >= cutoff),
-        "risk_tier": classify_risk_tier(probability)["tier"],
-        "risk_tier_en": classify_risk_tier(probability)["tier_en"],
     }
 
 
-def train_production_pipeline(*_: Any, **__: Any) -> Dict[str, Any]:
+def train_production_pipeline(
+    df_adult: Optional[pd.DataFrame] = None,
+    test_size: float = 0.20,
+    random_state: int = 42,
+) -> Dict[str, Any]:
     """Train the in-memory Logistic Regression pipeline."""
-    return run_logistic_regression_pipeline()
+    return run_logistic_regression_pipeline(
+        df_adult=df_adult, test_size=test_size, random_state=random_state
+    )

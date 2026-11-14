@@ -11,7 +11,6 @@ from src.data import (
 )
 from src.ml import (
     build_preprocessor,
-    classify_risk_tier,
     compute_classification_metrics,
     get_model_catalog,
     optimize_threshold,
@@ -25,7 +24,6 @@ __all__ = [
     "CuratedCohorts",
     "DatasetValidationError",
     "build_preprocessor",
-    "classify_risk_tier",
     "compute_classification_metrics",
     "curate_stroke_data",
     "get_curated_cohorts",

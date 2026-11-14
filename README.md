@@ -56,6 +56,12 @@ W aplikacji dostępne są dwa widoki:
 - **Kalkulator pacjenta** — trening modelu w pamięci i oszacowanie
   prawdopodobieństwa dla wprowadzonego profilu.
 
+Widok populacji aplikacji używa kuracyjnej kohorty dorosłych (wiek >= 18,
+bez rekordu `gender == "Other"`). Notebook najpierw opisuje cały zwalidowany
+plik (w tym osoby pediatryczne i rekord `Other`), a później używa tej samej
+kuracyjnej kohorty dorosłych do modelowania. Te zakresy są jawnie oznaczone,
+aby statystyki populacyjne nie były mylone z kohortą modelową.
+
 Model nie jest zapisywany ani ładowany z artefaktu. Każde uruchomienie trenuje
 pipeline na śledzonym pliku z ustalonym `random_state=42`. Wynik ma charakter
 akademicki i przesiewowy; nie jest diagnozą ani zaleceniem medycznym.
