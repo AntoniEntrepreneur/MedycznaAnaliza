@@ -9,7 +9,7 @@ import streamlit as st
 
 from src.config import CATEGORICAL_COLS, LOCAL_RAW_DATA_PATH, NUMERIC_CONTINUOUS_COLS
 from src.data import DatasetValidationError, curate_stroke_data, load_data
-from src.ml import load_production_pipeline, predict_stroke_risk
+from src.ml import predict_stroke_risk, train_production_pipeline
 
 
 CATEGORICAL_OPTIONS = {
@@ -30,7 +30,7 @@ def load_population() -> pd.DataFrame:
 @st.cache_resource(show_spinner="Trenowanie modelu na śledzonym zbiorze danych…")
 def get_model_result() -> Dict[str, Any]:
     """Train and cache the in-memory shared Logistic Regression pipeline."""
-    return load_production_pipeline()
+    return train_production_pipeline()
 
 
 def render_dataset_error(error: Exception) -> None:

@@ -1,4 +1,4 @@
-"""Configuration paths, remote dataset URLs, and feature definitions."""
+"""Repository paths and feature definitions."""
 
 from pathlib import Path
 
