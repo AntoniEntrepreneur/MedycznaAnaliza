@@ -44,8 +44,3 @@ env/
 .vscode/
 .idea/
 
-# Models and temporary caches
-models/*.pkl
-models/*.joblib
-!models/stroke_model.joblib
-*.log
